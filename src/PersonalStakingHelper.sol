@@ -102,7 +102,6 @@ contract PersonalStakingHelper is ReentrancyGuard {
         if (amount != 0) {
             rewardToken.forceApprove(address(govStaking), amount);
             govStaking.depositFor(owner, amount);
-            rewardToken.forceApprove(address(govStaking), 0);
         }
         emit RewardStaked(amount);
     }

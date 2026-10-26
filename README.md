@@ -53,8 +53,8 @@ without calling the rewards payout. Unpaid rewards remain claimable after a
 full principal exit. Failures in the vault, pool or Coin can still prevent exits.
 
 `claimAndStake()` requires no GOV approval from the owner. The helper approves
-the registered GOV staking contract for the exact amount and clears it after
-use. The non-transferable stGOV receipt belongs directly to the owner, who
+the registered GOV staking contract for the exact amount, which the staking
+transfer fully consumes. The non-transferable stGOV receipt belongs directly to the owner, who
 retains withdrawal, rewards and delegation rights. First-time voting delegation
 is separate. GOV staking harvests revenue; if it fails, the whole transaction
 reverts and plain `claim()` remains available. A zero GOV balance skips staking.
