@@ -11,3 +11,7 @@ interface IStakingRewards {
     function withdraw(uint256 amount) external;
     function getReward() external;
 }
+
+interface IStakedGovToken {
+    function depositFor(address account, uint256 value) external returns (bool);
+}

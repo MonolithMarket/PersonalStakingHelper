@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
+import {IStakingRewards, IStakedGovToken} from "./interfaces/IStakingRewards.sol";
 
 /// @notice One owner's position in a fixed Monolith vault and existing rewards pool.
 /// @dev Each clone's owner and market are set once by the factory at creation.
@@ -15,6 +15,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
     address public immutable factory;
     IERC4626 public vault;
     IStakingRewards public stakingRewards;
+    IStakedGovToken public govStaking;
     IERC20 public asset;
     IERC20 public rewardToken;
     address public owner;
@@ -24,6 +25,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
     error AlreadyInitialized();
     error ZeroAddress();
     error ZeroAmount();
+    error NotVaultStaking();
     error InsufficientShares(uint256 received, uint256 minimum);
     error InsufficientAssets(uint256 received, uint256 minimum);
 
@@ -31,6 +33,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
     event Withdrawn(uint256 shares);
     event WithdrawnAndRedeemed(uint256 shares, uint256 assets);
     event RewardClaimed(uint256 amount);
+    event RewardStaked(uint256 amount);
     event TokenRecovered(address indexed token, uint256 amount);
 
     /// @dev Called only by the factory's constructor. Locks the implementation.
@@ -50,17 +53,18 @@ contract PersonalStakingHelper is ReentrancyGuard {
     }
 
     /// @dev The factory creates and initializes each clone in the same call.
-    function initialize(address owner_, IERC4626 vault_, IStakingRewards stakingRewards_) external onlyFactory {
+    function initialize(address owner_, IERC4626 vault_, IStakingRewards stakingRewards_, address govStaking_) external onlyFactory {
         if (owner != address(0)) revert AlreadyInitialized();
         if (owner_ == address(0)) revert ZeroAddress();
         owner = owner_;
         vault = vault_;
         stakingRewards = stakingRewards_;
+        govStaking = IStakedGovToken(govStaking_);
         asset = IERC20(vault_.asset());
         rewardToken = IERC20(stakingRewards_.rewardsToken());
     }
 
-    /// @notice Deposits exactly the assets just supplied by the factory.
+    /// @notice Stakes Token directly, or deposits and stakes sToken, as configured by the DAO.
     /// @dev Existing/donated balances are excluded. There is no shared accounting.
     function depositAndStake(uint256 assets, uint256 minShares)
         external
@@ -69,15 +73,19 @@ contract PersonalStakingHelper is ReentrancyGuard {
         returns (uint256 shares)
     {
         if (assets == 0) revert ZeroAmount();
-        asset.forceApprove(address(vault), assets);
-        shares = vault.deposit(assets, address(this));
-        asset.forceApprove(address(vault), 0);
+        IERC20 stakingToken = IERC20(stakingRewards.stakingToken());
+        shares = assets;
+        if (address(stakingToken) == address(vault)) {
+            asset.forceApprove(address(vault), assets);
+            shares = vault.deposit(assets, address(this));
+            asset.forceApprove(address(vault), 0);
+        }
 
         // Includes Monolith's first-deposit MIN_SHARES deduction.
         if (shares == 0 || shares < minShares) revert InsufficientShares(shares, minShares);
-        IERC20(address(vault)).forceApprove(address(stakingRewards), shares);
+        stakingToken.forceApprove(address(stakingRewards), shares);
         stakingRewards.stake(shares);
-        IERC20(address(vault)).forceApprove(address(stakingRewards), 0);
+        stakingToken.forceApprove(address(stakingRewards), 0);
 
         emit DepositedAndStaked(assets, shares);
     }
@@ -87,12 +95,24 @@ contract PersonalStakingHelper is ReentrancyGuard {
         return _claim();
     }
 
-    /// @notice Unstakes sToken to the owner and optionally claims GOV.
+    /// @notice Claims and stakes all loose GOV for the fixed owner, including donated GOV.
+    function claimAndStake() external onlyOwner nonReentrant returns (uint256 amount) {
+        stakingRewards.getReward();
+        amount = rewardToken.balanceOf(address(this));
+        if (amount != 0) {
+            rewardToken.forceApprove(address(govStaking), amount);
+            govStaking.depositFor(owner, amount);
+            rewardToken.forceApprove(address(govStaking), 0);
+        }
+        emit RewardStaked(amount);
+    }
+
+    /// @notice Unstakes the pool's Token or sToken to the owner and optionally claims GOV.
     /// @dev With claimRewards=false, GOV claims cannot block the withdrawal.
     function withdraw(uint256 shares, bool claimRewards) external onlyOwner nonReentrant {
         if (shares == 0) revert ZeroAmount();
         stakingRewards.withdraw(shares);
-        IERC20(address(vault)).safeTransfer(owner, shares);
+        IERC20(stakingRewards.stakingToken()).safeTransfer(owner, shares);
         emit Withdrawn(shares);
         if (claimRewards) _claim();
     }
@@ -105,6 +125,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
         nonReentrant
         returns (uint256 assets)
     {
+        if (stakingRewards.stakingToken() != address(vault)) revert NotVaultStaking();
         if (shares == 0) revert ZeroAmount();
         stakingRewards.withdraw(shares);
         assets = vault.redeem(shares, owner, address(this));

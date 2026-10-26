@@ -437,14 +437,14 @@ contract PersonalStakingHelperTest is HelperFixture {
         helper.depositAndStake(1, 0);
         vm.prank(bob);
         vm.expectRevert(PersonalStakingHelper.OnlyFactory.selector);
-        helper.initialize(bob, vault, IStakingRewards(address(pool)));
+        helper.initialize(bob, vault, IStakingRewards(address(pool)), address(0));
         vm.prank(address(factory));
         vm.expectRevert(PersonalStakingHelper.AlreadyInitialized.selector);
-        helper.initialize(bob, vault, IStakingRewards(address(pool)));
+        helper.initialize(bob, vault, IStakingRewards(address(pool)), address(0));
         PersonalStakingHelper implementation = factory.implementation();
         vm.prank(address(factory));
         vm.expectRevert(PersonalStakingHelper.AlreadyInitialized.selector);
-        implementation.initialize(alice, vault, IStakingRewards(address(pool)));
+        implementation.initialize(alice, vault, IStakingRewards(address(pool)), address(0));
     }
 
     function test_InsufficientApprovalOrBalanceRevertsCloneCreation() public {

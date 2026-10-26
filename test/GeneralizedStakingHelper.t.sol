@@ -118,15 +118,19 @@ contract GeneralizedStakingHelperTest is HelperFixture {
         assertClean(helper);
     }
 
-    function test_TokenStakingDAORejectedBeforeCloneCreationOrFunding() public {
+    function test_TokenStakingDAODepositsAndWithdrawsWithoutUsingVault() public {
         (uint256 id, TestMarket memory direct) = createDAO("DirectToken", false);
         fundAndApprove(direct, alice, 100e18);
-        uint64 nonceBefore = vm.getNonce(address(factory));
         vm.prank(alice);
-        vm.expectRevert(PersonalStakingHelperFactory.InvalidPair.selector);
-        factory.depositAndStake(id, 100e18, 1);
-        assertEq(address(factory.helperOf(id, alice)), address(0));
-        assertEq(vm.getNonce(address(factory)), nonceBefore);
+        (PersonalStakingHelper helper, uint256 amount) = factory.depositAndStake(id, 100e18, 100e18);
+        assertEq(amount, 100e18);
+        assertEq(helper.stakedShares(), amount);
+        assertEq(helper.stakingRewards().stakingToken(), address(direct.token));
+        assertEq(direct.vault.totalSupply(), 0);
+        assertEq(direct.token.balanceOf(alice), 0);
+        assertEq(direct.token.allowance(address(helper), address(direct.pool)), 0);
+        vm.prank(alice);
+        helper.withdraw(amount, false);
         assertEq(direct.token.balanceOf(alice), 100e18);
         assertEq(direct.token.balanceOf(address(factory)), 0);
         assertEq(direct.pool.totalSupply(), 0);
@@ -157,7 +161,7 @@ contract GeneralizedStakingHelperTest is HelperFixture {
         (, TestMarket memory second) = createDAO("SecondToken", true);
         vm.prank(address(factory));
         vm.expectRevert(PersonalStakingHelper.AlreadyInitialized.selector);
-        helper.initialize(alice, second.vault, IStakingRewards(address(second.pool)));
+        helper.initialize(alice, second.vault, IStakingRewards(address(second.pool)), address(0));
         assertEq(helper.owner(), alice);
         assertEq(address(helper.asset()), address(token));
         assertEq(address(helper.vault()), address(vault));

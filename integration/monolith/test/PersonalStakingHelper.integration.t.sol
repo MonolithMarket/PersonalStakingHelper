@@ -166,21 +166,51 @@ contract PersonalStakingHelperIntegrationTest is Test {
         _assertClean(second, b);
     }
 
-    function test_RealTokenStakingDAOIsRejectedAtomically() public {
+    function test_RealTokenStakingDAOClaimsStakesGovAndExits() public {
         Market memory market = _launch(false);
         assertEq(market.pool.stakingToken(), address(market.token));
         _borrowAndApprove(market, alice, 1000e18);
         uint256 balance = market.token.balanceOf(alice);
-        uint256 allowance = market.token.allowance(alice, address(factory));
-        uint64 nonce = vm.getNonce(address(factory));
-        vm.prank(alice);
-        vm.expectRevert(PersonalStakingHelperFactory.InvalidPair.selector);
-        factory.depositAndStake(market.id, 100e18, 1);
-        assertEq(address(factory.helperOf(market.id, alice)), address(0));
-        assertEq(vm.getNonce(address(factory)), nonce);
-        assertEq(market.token.balanceOf(alice), balance);
-        assertEq(market.token.allowance(alice, address(factory)), allowance);
+        (PersonalStakingHelper helper, uint256 amount) = _deposit(market, alice, 100e18);
+        assertEq(amount, 100e18);
         assertEq(market.vault.totalSupply(), 0);
+        _assertClaimAndStake(market, helper, alice);
+        vm.prank(alice);
+        helper.withdraw(amount, false);
+        assertEq(market.token.balanceOf(alice), balance);
+        assertEq(market.vault.totalSupply(), 0);
+        assertEq(helper.stakedShares(), 0);
+        _assertClean(market, helper);
+    }
+
+    function test_RealVaultStakingDAOClaimsAndStakesGovForOwner() public {
+        Market memory market = _launch(true);
+        _borrowAndApprove(market, alice, 1000e18);
+        (PersonalStakingHelper helper, uint256 shares) = _deposit(market, alice, 100e18);
+        _assertClaimAndStake(market, helper, alice);
+        assertEq(helper.stakedShares(), shares);
+        uint256 quote = market.vault.previewRedeem(shares);
+        vm.prank(alice);
+        helper.withdrawAndRedeem(shares, quote, false);
+        assertEq(helper.stakedShares(), 0);
+        _assertClean(market, helper);
+    }
+
+    function _assertClaimAndStake(Market memory market, PersonalStakingHelper helper, address who) internal {
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 reward = helper.earned();
+        assertGt(reward, 0);
+        address staker = registry.deployments(market.id).staker;
+        assertEq(address(helper.govStaking()), staker);
+        uint256 beforeBalance = IERC20(staker).balanceOf(who);
+        vm.prank(who);
+        assertEq(helper.claimAndStake(), reward);
+        assertEq(IERC20(staker).balanceOf(who) - beforeBalance, reward);
+        assertEq(IERC20(staker).balanceOf(address(helper)), 0);
+        assertEq(market.gov.balanceOf(who), 0);
+        assertEq(market.gov.balanceOf(address(helper)), 0);
+        assertEq(market.gov.allowance(address(helper), staker), 0);
+        assertEq(helper.earned(), 0);
     }
 
     function test_ExistingMarketAttachmentUsesCoinDAOId() public {
@@ -241,7 +271,8 @@ contract PersonalStakingHelperIntegrationTest is Test {
         internal
         returns (PersonalStakingHelper helper, uint256 shares)
     {
-        uint256 quote = market.vault.previewDeposit(amount);
+        uint256 quote =
+            market.pool.stakingToken() == address(market.vault) ? market.vault.previewDeposit(amount) : amount;
         vm.prank(who);
         return factory.depositAndStake(market.id, amount, quote);
     }

@@ -10,7 +10,7 @@ import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
 import {ICoinDAOFactory} from "./interfaces/ICoinDAOFactory.sol";
 import {PersonalStakingHelper} from "./PersonalStakingHelper.sol";
 
-/// @notice Token -> sToken -> GOV rewards, with one helper per owner and CoinDAO.
+/// @notice Token or sToken staking for GOV rewards, with one helper per owner and CoinDAO.
 /// @dev One fixed, trusted CoinDAOFactory registry. No admin or upgrade path.
 contract PersonalStakingHelperFactory is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -46,10 +46,11 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
         helper = helperOf[daoId][msg.sender];
         if (address(helper) == address(0)) {
             ICoinDAOFactory.Deployment memory deployment = coinDAOFactory.deployments(daoId);
-            if (deployment.vault == address(0) || deployment.stakingToken != deployment.vault) revert InvalidPair();
+            if (deployment.vault == address(0)) revert InvalidPair();
+            if (deployment.stakingToken != deployment.vault && deployment.stakingToken != deployment.coin) revert InvalidPair();
             helper = PersonalStakingHelper(Clones.clone(address(implementation)));
             helper.initialize(
-                msg.sender, IERC4626(deployment.vault), IStakingRewards(deployment.coinStakingRewards)
+                msg.sender, IERC4626(deployment.vault), IStakingRewards(deployment.coinStakingRewards), deployment.staker
             );
             helperOf[daoId][msg.sender] = helper;
             emit HelperCreated(daoId, msg.sender, address(helper));

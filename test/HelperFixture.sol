@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {StakingRewards} from "../lib/monolith-gov/src/StakingRewards.sol";
+import {StakedGovToken} from "../lib/monolith-gov/src/StakedGovToken.sol";
 // Include this test-only bridge in the native build for the Monolith integration suite.
 import {CoinDAOTestDeployer} from "./helpers/CoinDAOTestDeployer.sol";
 import {PersonalStakingHelper} from "../src/PersonalStakingHelper.sol";
@@ -85,6 +86,21 @@ contract LenderStub {
     }
 }
 
+contract RevenueRouterStub {
+    bool public blocked;
+    uint256 public calls;
+
+    function setBlocked(bool value) external {
+        blocked = value;
+    }
+
+    function distribute() external returns (uint256, uint256) {
+        require(!blocked, "ROUTER_BLOCKED");
+        calls++;
+        return (0, 0);
+    }
+}
+
 struct TestMarket {
     MockToken token;
     MockToken gov;
@@ -138,8 +154,11 @@ abstract contract HelperFixture is Test {
         market.pool.initialize(stakingToken, address(market.gov), address(this), DURATION);
         market.gov.mint(address(market.pool), DURATION * 1e18);
         market.pool.notifyRewardAmount(DURATION * 1e18);
+        StakedGovToken staker = StakedGovToken(Clones.clone(address(new StakedGovToken())));
+        staker.initialize(market.gov, market.token, "Staked GOV", "stGOV", address(new RevenueRouterStub()));
         CoinDAOFactoryRegistry.Deployment memory deployment;
         deployment.govToken = address(market.gov);
+        deployment.staker = address(staker);
         deployment.lender = address(market.lender);
         deployment.coin = address(market.token);
         deployment.vault = address(market.vault);
@@ -164,7 +183,8 @@ abstract contract HelperFixture is Test {
         internal
         returns (PersonalStakingHelper helper, uint256 shares)
     {
-        uint256 quote = market.vault.previewDeposit(assets);
+        uint256 quote =
+            address(market.pool.stakingToken()) == address(market.vault) ? market.vault.previewDeposit(assets) : assets;
         vm.prank(who);
         return factory.depositAndStake(id, assets, quote);
     }
