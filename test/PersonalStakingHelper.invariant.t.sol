@@ -74,6 +74,21 @@ contract HelperHandler is Test {
         withdrawals++;
     }
 
+    function restake(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed) external {
+        uint256 index = marketSeed % markets.length;
+        uint256 id = daoIds[index];
+        IERC4626 vault = markets[index].vault;
+        address actor = actors[actorSeed % 3];
+        uint256 balance = vault.balanceOf(actor);
+        if (balance == 0) return;
+        uint256 shares = 1 + sharesSeed % balance;
+        vm.startPrank(actor);
+        vault.approve(address(factory), shares);
+        factory.stake(id, shares);
+        vm.stopPrank();
+        expectedShares[id][actor] += shares;
+    }
+
     function redeem(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed, bool claimRewards) external {
         uint256 index = marketSeed % markets.length;
         uint256 id = daoIds[index];
@@ -129,12 +144,13 @@ contract PersonalStakingHelperInvariantTest is HelperFixture {
         markets[0] = TestMarket(token, gov, lender, vault, pool);
         (daoIds[1], markets[1]) = createDAO("SecondToken", true);
         handler = new HelperHandler(factory, daoIds, markets);
-        bytes4[] memory selectors = new bytes4[](5);
+        bytes4[] memory selectors = new bytes4[](6);
         selectors[0] = handler.deposit.selector;
         selectors[1] = handler.withdraw.selector;
         selectors[2] = handler.redeem.selector;
         selectors[3] = handler.claim.selector;
         selectors[4] = handler.accrue.selector;
+        selectors[5] = handler.restake.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }

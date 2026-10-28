@@ -83,11 +83,21 @@ contract PersonalStakingHelper is ReentrancyGuard {
 
         // Includes Monolith's first-deposit MIN_SHARES deduction.
         if (shares == 0 || shares < minShares) revert InsufficientShares(shares, minShares);
+        _stake(stakingToken, shares);
+
+        emit DepositedAndStaked(assets, shares);
+    }
+
+    /// @notice Stakes exactly the pool tokens just supplied by the factory.
+    function stake(uint256 shares) external onlyFactory nonReentrant {
+        if (shares == 0) revert ZeroAmount();
+        _stake(IERC20(stakingRewards.stakingToken()), shares);
+    }
+
+    function _stake(IERC20 stakingToken, uint256 shares) private {
         stakingToken.forceApprove(address(stakingRewards), shares);
         stakingRewards.stake(shares);
         stakingToken.forceApprove(address(stakingRewards), 0);
-
-        emit DepositedAndStaked(assets, shares);
     }
 
     /// @notice Claims GOV to the fixed owner, including any GOV sent here directly.

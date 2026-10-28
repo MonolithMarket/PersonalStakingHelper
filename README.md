@@ -37,6 +37,12 @@ incompatible registry requires a separate helper factory.
 Approval is a separate transaction unless the user's smart account batches it.
 The caller funds and owns the position; there is no arbitrary payer or receiver.
 
+For existing sCoin, approve sCoin to the factory and call `stake(daoId, shares)`.
+This stakes the pool's configured token directly, without another vault deposit
+or redemption, and creates or reuses the same personal helper. For direct-Coin
+pools, the same method accepts Coin. Only the supplied amount is staked; loose
+tokens already at the helper remain recoverable by its owner.
+
 Owner actions on the helper:
 
 | Method | Result |
@@ -83,7 +89,7 @@ implementations are trusted. Coin and GOV must transfer exact amounts and mainta
 fee-on-transfer and rebasing tokens are unsupported. The helper does not fund
 reward schedules or move existing wallet stakes automatically. Direct wallet
 stakes and their previously accrued GOV remain separate. Moving a stake into
-the helper requires withdrawing it and depositing through the helper factory;
+the helper requires withdrawing it and calling the factory's `stake` route;
 previously accrued GOV remains claimable from the original account. The helper
 implementation is fixed; existing deployed
 helpers cannot acquire this new function through an upgrade.

@@ -128,6 +128,40 @@ contract PersonalStakingHelperIntegrationTest is Test {
         _assertClean(market, b);
     }
 
+    function test_ExistingSCoinStakeMigratesWithoutRedeemingOrMovingPastRewards() public {
+        Market memory market = _launch(true);
+        _borrowAndApprove(market, alice, 1000e18);
+        vm.startPrank(alice);
+        market.token.approve(address(market.vault), 500e18);
+        uint256 shares = market.vault.deposit(500e18, alice);
+        market.vault.approve(address(market.pool), shares);
+        market.pool.stake(shares);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 oldReward = market.pool.earned(alice);
+        assertGt(oldReward, 0);
+        market.pool.withdraw(shares);
+        uint256 supply = market.vault.totalSupply();
+        uint256 coinBalance = market.token.balanceOf(alice);
+        market.vault.approve(address(factory), shares);
+        PersonalStakingHelper helper = factory.stake(market.id, shares);
+        assertEq(helper.owner(), alice);
+        assertEq(helper.stakedShares(), shares);
+        assertEq(market.vault.totalSupply(), supply);
+        assertEq(market.token.balanceOf(alice), coinBalance);
+        assertEq(market.pool.earned(alice), oldReward);
+        assertEq(helper.earned(), 0);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 newReward = helper.earned();
+        assertGt(newReward, 0);
+        helper.withdraw(shares, true);
+        assertEq(market.vault.balanceOf(alice), shares);
+        assertEq(market.gov.balanceOf(alice), newReward);
+        market.pool.getReward();
+        assertEq(market.gov.balanceOf(alice), oldReward + newReward);
+        vm.stopPrank();
+        _assertClean(market, helper);
+    }
+
     function test_FutureDAOsKeepOneOwnersPositionsIsolated() public {
         Market memory first = _launch(true);
         _borrowAndApprove(first, alice, 1000e18);

@@ -27,6 +27,7 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
     event DepositedAndStaked(
         uint256 indexed daoId, address indexed owner, address indexed helper, uint256 assets, uint256 shares
     );
+    event Staked(uint256 indexed daoId, address indexed owner, address indexed helper, uint256 shares);
 
     constructor(ICoinDAOFactory coinDAOFactory_) {
         if (address(coinDAOFactory_).code.length == 0) revert InvalidFactory();
@@ -43,6 +44,22 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
     {
         if (assets == 0) revert ZeroAmount();
 
+        helper = _getOrCreateHelper(daoId);
+        helper.asset().safeTransferFrom(msg.sender, address(helper), assets);
+        shares = helper.depositAndStake(assets, minShares);
+        emit DepositedAndStaked(daoId, msg.sender, address(helper), assets, shares);
+    }
+
+    /// @notice Stakes existing sCoin, or Coin for direct-Coin pools, for the caller.
+    function stake(uint256 daoId, uint256 shares) external nonReentrant returns (PersonalStakingHelper helper) {
+        if (shares == 0) revert ZeroAmount();
+        helper = _getOrCreateHelper(daoId);
+        IERC20(helper.stakingRewards().stakingToken()).safeTransferFrom(msg.sender, address(helper), shares);
+        helper.stake(shares);
+        emit Staked(daoId, msg.sender, address(helper), shares);
+    }
+
+    function _getOrCreateHelper(uint256 daoId) private returns (PersonalStakingHelper helper) {
         helper = helperOf[daoId][msg.sender];
         if (address(helper) == address(0)) {
             ICoinDAOFactory.Deployment memory deployment = coinDAOFactory.deployments(daoId);
@@ -55,9 +72,5 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
             helperOf[daoId][msg.sender] = helper;
             emit HelperCreated(daoId, msg.sender, address(helper));
         }
-
-        helper.asset().safeTransferFrom(msg.sender, address(helper), assets);
-        shares = helper.depositAndStake(assets, minShares);
-        emit DepositedAndStaked(daoId, msg.sender, address(helper), assets, shares);
     }
 }

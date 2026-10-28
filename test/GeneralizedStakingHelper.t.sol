@@ -10,8 +10,153 @@ import {
     IStakingRewards,
     CoinDAOFactoryRegistry
 } from "./HelperFixture.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract GeneralizedStakingHelperTest is HelperFixture {
+    function _existingSCoin(address who, uint256 assets) private returns (uint256 shares) {
+        vm.startPrank(who);
+        token.approve(address(vault), assets);
+        shares = vault.deposit(assets, who);
+        vault.approve(address(factory), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function test_ExistingSCoinCreatesHelperWithoutDepositingAgain() public {
+        uint256 shares = _existingSCoin(alice, 100e18);
+        uint256 supply = vault.totalSupply();
+        uint256 coinBalance = token.balanceOf(alice);
+        vm.prank(alice);
+        PersonalStakingHelper helper = factory.stake(daoId, shares);
+        assertEq(helper.owner(), alice);
+        assertEq(address(factory.helperOf(daoId, alice)), address(helper));
+        assertEq(helper.stakedShares(), shares);
+        assertEq(vault.totalSupply(), supply);
+        assertEq(token.balanceOf(alice), coinBalance);
+        assertEq(vault.balanceOf(alice), 0);
+        assertClean(helper);
+    }
+
+    function test_SCoinAndCoinEntriesReusePositionAndPreserveRewards() public {
+        uint256 shares = _existingSCoin(alice, 100e18);
+        vm.prank(alice);
+        PersonalStakingHelper helper = factory.stake(daoId, shares);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 reward = helper.earned();
+        (PersonalStakingHelper reused, uint256 added) = deposit(alice, 50e18);
+        assertEq(address(reused), address(helper));
+        assertEq(helper.earned(), reward);
+        uint256 extra = _existingSCoin(alice, 25e18);
+        vm.prank(alice);
+        assertEq(address(factory.stake(daoId, extra)), address(helper));
+        assertEq(helper.stakedShares(), shares + added + extra);
+        vm.prank(alice);
+        helper.withdraw(shares + added + extra, true);
+        assertEq(vault.balanceOf(alice), shares + added + extra);
+        assertEq(gov.balanceOf(alice), reward);
+        assertClean(helper);
+    }
+
+    function test_SCoinEntryKeepsOwnersAndLooseDonationsSeparate() public {
+        uint256 aliceShares = _existingSCoin(alice, 100e18);
+        uint256 bobShares = _existingSCoin(bob, 200e18);
+        vm.prank(alice);
+        PersonalStakingHelper a = factory.stake(daoId, aliceShares / 2);
+        vm.prank(alice);
+        vault.transfer(address(a), 7e18);
+        uint256 remaining = vault.balanceOf(alice);
+        vm.prank(alice);
+        factory.stake(daoId, remaining);
+        vm.prank(bob);
+        PersonalStakingHelper b = factory.stake(daoId, bobShares);
+        assertNotEq(address(a), address(b));
+        assertEq(a.stakedShares(), aliceShares - 7e18);
+        assertEq(b.stakedShares(), bobShares);
+        assertEq(vault.balanceOf(address(a)), 7e18);
+        vm.prank(alice);
+        a.recoverToken(vault);
+        assertEq(vault.balanceOf(alice), 7e18);
+        assertClean(a);
+        assertClean(b);
+    }
+
+    function test_SCoinEntryRequiresSCoinAllowanceAndRollsBackCreation() public {
+        uint256 shares = _existingSCoin(alice, 100e18);
+        vm.prank(alice);
+        vault.approve(address(factory), 0);
+        uint64 nonce = vm.getNonce(address(factory));
+        vm.prank(alice);
+        vm.expectRevert();
+        factory.stake(daoId, shares);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(pool.totalSupply(), 0);
+        assertEq(address(factory.helperOf(daoId, alice)), address(0));
+        assertEq(vm.getNonce(address(factory)), nonce);
+    }
+
+    function test_FailedSCoinStakeRollsBackTransfersAndCreation() public {
+        uint256 shares = _existingSCoin(alice, 100e18);
+        vm.mockCallRevert(
+            address(pool), abi.encodeCall(IStakingRewards.stake, (shares)), abi.encodeWithSignature("Error(string)", "STAKE_FAILED")
+        );
+        vm.prank(alice);
+        vm.expectRevert("STAKE_FAILED");
+        factory.stake(daoId, shares);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(pool.totalSupply(), 0);
+        assertEq(address(factory.helperOf(daoId, alice)), address(0));
+    }
+
+    function test_StakeRejectsZeroAndDirectHelperCalls() public {
+        vm.prank(alice);
+        vm.expectRevert(PersonalStakingHelperFactory.ZeroAmount.selector);
+        factory.stake(daoId, 0);
+        assertEq(address(factory.helperOf(daoId, alice)), address(0));
+        (PersonalStakingHelper helper,) = deposit(alice, 100e18);
+        vm.prank(bob);
+        vm.expectRevert(PersonalStakingHelper.OnlyFactory.selector);
+        helper.stake(1);
+        vm.prank(address(factory));
+        vm.expectRevert(PersonalStakingHelper.ZeroAmount.selector);
+        helper.stake(0);
+    }
+
+    function test_StakeRejectsUnknownDAOWithoutCreatingHelper() public {
+        uint256 shares = _existingSCoin(alice, 100e18);
+        vm.prank(alice);
+        vm.expectRevert();
+        factory.stake(type(uint256).max, shares);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(address(factory.helperOf(type(uint256).max, alice)), address(0));
+    }
+
+    function test_StakeSupportsDirectCoinAndRejectsCallbackReentrancy() public {
+        (uint256 id, TestMarket memory direct) = createDAO("Direct", false);
+        fundAndApprove(direct, alice, 200e18);
+        direct.token.setHook(alice, address(factory), abi.encodeCall(factory.stake, (id, 1)));
+        vm.prank(alice);
+        PersonalStakingHelper helper = factory.stake(id, 100e18);
+        assertFalse(direct.token.callbackSuccess());
+        assertEq(direct.token.callbackResult(), abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector));
+        assertEq(helper.stakedShares(), 100e18);
+        (PersonalStakingHelper reused,) = depositIn(id, direct, alice, 100e18);
+        assertEq(address(reused), address(helper));
+        assertEq(helper.stakedShares(), 200e18);
+        assertEq(direct.vault.totalSupply(), 0);
+        assertClean(helper);
+    }
+
+    function testFuzz_ExistingSCoinRoundTrip(uint96 amount_) public {
+        uint256 amount = bound(uint256(amount_), MIN_SHARES + 1, 1e26);
+        uint256 shares = _existingSCoin(alice, amount);
+        vm.prank(alice);
+        PersonalStakingHelper helper = factory.stake(daoId, shares);
+        vm.prank(alice);
+        helper.withdraw(shares, false);
+        assertEq(vault.balanceOf(alice), shares);
+        assertEq(helper.stakedShares(), 0);
+        assertClean(helper);
+    }
+
     function test_PublicRegistryGetterDecodesDeploymentFields() public {
         CoinDAOFactoryRegistry.Deployment memory expected = CoinDAOFactoryRegistry.Deployment({
             govToken: address(0x101),
