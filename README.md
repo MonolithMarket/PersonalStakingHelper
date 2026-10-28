@@ -44,10 +44,13 @@ pools, the same method accepts Coin. Only the supplied amount is staked; loose
 tokens already at the helper remain recoverable by its owner.
 
 For a swap into Coin, call
-`zapAndStake(daoId, tokenIn, amountIn, aggregator, data, minShares)` on the
+`zapAndStake(daoId, tokenIn, amountIn, aggregator, data, minCoinOut, minShares)` on the
 factory after approving its ERC20 input allowance. The factory funds the caller's
 helper; that helper approves the aggregator for exactly `amountIn`, executes the
 calldata, clears the approval, and deposits and stakes its entire Coin balance.
+`minCoinOut` bounds the Coin balance increase across the swap; existing Coin
+cannot satisfy it. `minShares` separately bounds the stake from the full final
+balance. Zero `minCoinOut` permits no increase but still rejects a balance decrease.
 The swap and staking steps succeed or revert together. This route emits the
 factory's `Staked` event and the helper's `DepositedAndStaked` event.
 
@@ -59,7 +62,7 @@ that address. A predicted address does not establish that a DAO is eligible.
 The aggregator must spend the approved ERC20 itself and return Coin to the
 helper. Native-ETH inputs and separate approval-spender contracts are not part
 of this interface. Use trusted router addresses and calldata, including the
-swap's own minimum output; `minShares` applies to the entire Coin balance,
+swap's own minimum output. Set `minCoinOut` from the swap quote; `minShares` applies to the entire Coin balance,
 including Coin previously sent to this owner's helper. No generic refund flow
 is added: any unspent input remains recoverable through `recoverToken`.
 

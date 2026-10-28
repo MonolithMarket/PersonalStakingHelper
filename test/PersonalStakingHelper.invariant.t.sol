@@ -94,7 +94,7 @@ contract HelperHandler is Test {
         if (quote == 0) return;
         bytes memory data = abi.encodeCall(router.swap, (zapInput, market.token, amount, amount, factory.predictHelper(id, actor)));
         vm.prank(actor);
-        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(id, zapInput, amount, address(router), data, quote);
+        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(id, zapInput, amount, address(router), data, amount, quote);
         expectedShares[id][actor] += shares;
         assertEq(zapInput.balanceOf(address(helper)), 0);
         assertEq(zapInput.allowance(address(helper), address(router)), 0);

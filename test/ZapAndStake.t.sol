@@ -42,7 +42,7 @@ contract ZapAndStakeTest is HelperFixture {
     {
         bytes memory data = _data(amountIn, amountOut, recipient);
         vm.prank(alice);
-        return factory.zapAndStake(daoId, input, amountIn, address(router), data, minShares);
+        return factory.zapAndStake(daoId, input, amountIn, address(router), data, amountOut, minShares);
     }
 
     function test_ZapCreatesHelperAndUsesSixDecimalInput() public {
@@ -101,7 +101,7 @@ contract ZapAndStakeTest is HelperFixture {
         address predicted = factory.predictHelper(id, alice);
         bytes memory data = abi.encodeCall(router.swap, (input, direct.token, 100e6, 100e18, predicted));
         vm.prank(alice);
-        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(id, input, 100e6, address(router), data, 100e18);
+        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(id, input, 100e6, address(router), data, 100e18, 100e18);
         assertEq(shares, 100e18);
         assertEq(helper.stakedShares(), shares);
         assertEq(direct.vault.totalSupply(), 0);
@@ -116,7 +116,7 @@ contract ZapAndStakeTest is HelperFixture {
         uint256 beforeInput = input.balanceOf(alice);
         vm.prank(alice);
         vm.expectRevert("SWAP_FAILED");
-        factory.zapAndStake(daoId, input, 100e6, address(router), abi.encodeCall(router.fail, ()), 0);
+        factory.zapAndStake(daoId, input, 100e6, address(router), abi.encodeCall(router.fail, ()), 100e18, 0);
         assertEq(input.balanceOf(alice), beforeInput);
         assertEq(input.balanceOf(address(router)), 0);
         assertEq(input.balanceOf(predicted), 0);
@@ -152,8 +152,8 @@ contract ZapAndStakeTest is HelperFixture {
         uint256 beforeInput = input.balanceOf(alice);
         uint256 beforeCoin = token.balanceOf(alice);
         vm.prank(alice);
-        vm.expectRevert(PersonalStakingHelper.ZeroAmount.selector);
-        factory.zapAndStake(daoId, input, 100e6, address(router), _data(100e6, 100e18, alice), 0);
+        vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 0, 100e18));
+        factory.zapAndStake(daoId, input, 100e6, address(router), _data(100e6, 100e18, alice), 100e18, 0);
         assertEq(input.balanceOf(alice), beforeInput);
         assertEq(token.balanceOf(alice), beforeCoin);
         assertEq(address(factory.helperOf(daoId, alice)), address(0));
@@ -166,7 +166,7 @@ contract ZapAndStakeTest is HelperFixture {
         bytes memory attack = abi.encodeCall(token.transferFrom, (bob, alice, 1e18));
         vm.prank(alice);
         vm.expectRevert();
-        factory.zapAndStake(daoId, token, 1e18, address(token), attack, 0);
+        factory.zapAndStake(daoId, token, 1e18, address(token), attack, 1e18, 0);
         assertEq(token.balanceOf(bob), bobBalance);
         assertEq(token.balanceOf(alice), aliceBalance);
         assertEq(victim.stakedShares(), victimShares);
@@ -187,7 +187,7 @@ contract ZapAndStakeTest is HelperFixture {
         address predicted = factory.predictHelper(daoId, alice);
         vm.prank(alice);
         (PersonalStakingHelper helper,) = factory.zapAndStake(
-            daoId, input, 100e6, address(router), _data(40e6, 100e18, predicted), 0
+            daoId, input, 100e6, address(router), _data(40e6, 100e18, predicted), 100e18, 0
         );
         assertEq(input.balanceOf(predicted), 60e6);
         assertEq(input.allowance(predicted, address(router)), 0);
@@ -201,25 +201,92 @@ contract ZapAndStakeTest is HelperFixture {
     function test_ZapRejectsZeroInputNonContractTargetAndDirectHelperCalls() public {
         vm.prank(alice);
         vm.expectRevert(PersonalStakingHelperFactory.ZeroAmount.selector);
-        factory.zapAndStake(daoId, input, 0, address(router), "", 0);
+        factory.zapAndStake(daoId, input, 0, address(router), "", 0, 0);
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Address.AddressEmptyCode.selector, bob));
-        factory.zapAndStake(daoId, input, 100e6, bob, "", 0);
+        factory.zapAndStake(daoId, input, 100e6, bob, "", 1, 0);
         assertEq(address(factory.helperOf(daoId, alice)), address(0));
         (PersonalStakingHelper helper,) = _zap(100e6, 100e18, 0);
         vm.prank(alice);
         vm.expectRevert(PersonalStakingHelper.OnlyFactory.selector);
-        helper.zapAndStake(input, 100e6, address(router), "", 0);
+        helper.zapAndStake(input, 100e6, address(router), "", 1, 0);
     }
 
-    function testFuzz_ZapAndRedeemRoundTrip(uint64 amount_) public {
+    function test_PrefundedCoinCannotMaskZeroOutputOrWrongRecipient() public {
+        token.mint(recipient, 100e18);
+        uint256 beforeInput = input.balanceOf(alice);
+        uint256 bobBefore = token.balanceOf(bob);
+        uint256 routerBefore = token.balanceOf(address(router));
+        for (uint256 i; i < 2; ++i) {
+            bytes memory data = _data(100e6, i == 0 ? 0 : 100e18, i == 0 ? recipient : bob);
+            vm.prank(alice);
+            vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 100e18, 200e18));
+            factory.zapAndStake(daoId, input, 100e6, address(router), data, 100e18, 100e18 - MIN_SHARES);
+            assertEq(input.balanceOf(alice), beforeInput);
+            assertEq(input.balanceOf(address(router)), 0);
+            assertEq(input.allowance(recipient, address(router)), 0);
+            assertEq(token.balanceOf(recipient), 100e18);
+            assertEq(token.balanceOf(bob), bobBefore);
+            assertEq(token.balanceOf(address(router)), routerBefore);
+            assertEq(address(factory.helperOf(daoId, alice)), address(0));
+            assertEq(recipient.code.length, 0);
+        }
+    }
+
+    function test_MinCoinOutRejectsShortfallAndAcceptsExactFreshOutput() public {
+        token.mint(recipient, 100e18);
+        bytes memory data = _data(100e6, 25e18, recipient);
+        uint256 beforeInput = input.balanceOf(alice);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 125e18, 130e18));
+        factory.zapAndStake(daoId, input, 100e6, address(router), data, 30e18, 100e18 - MIN_SHARES);
+        assertEq(input.balanceOf(alice), beforeInput);
+        assertEq(token.balanceOf(recipient), 100e18);
+        assertEq(vault.totalSupply(), 0);
+        vm.prank(alice);
+        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(
+            daoId, input, 100e6, address(router), data, 25e18, 125e18 - MIN_SHARES
+        );
+        assertEq(shares, 125e18 - MIN_SHARES);
+        assertEq(helper.stakedShares(), shares);
+        assertEq(token.balanceOf(recipient), 0);
+        assertClean(helper);
+    }
+
+    function test_CoinBalanceDecreaseRevertsEvenWithZeroMinimum() public {
+        token.mint(recipient, 100e18);
+        uint256 bobBefore = token.balanceOf(bob);
+        bytes memory data = abi.encodeCall(token.transfer, (bob, 1e18));
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 99e18, 100e18));
+        factory.zapAndStake(daoId, input, 100e6, address(token), data, 0, 0);
+        assertEq(token.balanceOf(recipient), 100e18);
+        assertEq(token.balanceOf(bob), bobBefore);
+        assertEq(address(factory.helperOf(daoId, alice)), address(0));
+    }
+
+    function test_FailedOutputMinimumRollsBackUnrelatedTokenApproval() public {
+        token.mint(recipient, 100e18);
+        bytes memory data = abi.encodeCall(gov.approve, (bob, type(uint256).max));
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 100e18, 100e18 + 1));
+        factory.zapAndStake(daoId, input, 100e6, address(gov), data, 1, 0);
+        assertEq(gov.allowance(recipient, bob), 0);
+        assertEq(input.balanceOf(recipient), 0);
+        assertEq(address(factory.helperOf(daoId, alice)), address(0));
+    }
+
+    function testFuzz_ZapAndRedeemRoundTrip(uint64 amount_, uint96 prefund_) public {
         uint256 amountIn = bound(uint256(amount_), 1e6, 1000e6);
         uint256 amountOut = amountIn * 1e12;
+        uint256 prefund = bound(uint256(prefund_), 0, 100e18);
+        token.mint(recipient, prefund);
+        uint256 total = amountOut + prefund;
         uint256 beforeCoin = token.balanceOf(alice);
-        (PersonalStakingHelper helper, uint256 shares) = _zap(amountIn, amountOut, amountOut - MIN_SHARES);
+        (PersonalStakingHelper helper, uint256 shares) = _zap(amountIn, amountOut, total - MIN_SHARES);
         vm.prank(alice);
-        helper.withdrawAndRedeem(shares, amountOut - MIN_SHARES, false);
-        assertEq(token.balanceOf(alice) - beforeCoin, amountOut - MIN_SHARES);
+        helper.withdrawAndRedeem(shares, total - MIN_SHARES, false);
+        assertEq(token.balanceOf(alice) - beforeCoin, total - MIN_SHARES);
         assertEq(helper.stakedShares(), 0);
         assertEq(input.allowance(address(helper), address(router)), 0);
         assertClean(helper);

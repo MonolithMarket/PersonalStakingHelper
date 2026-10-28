@@ -61,12 +61,12 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
 
     /// @notice Swaps the caller's ERC20 input into Coin and stakes through their helper.
     function zapAndStake(
-        uint256 daoId, IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minShares
+        uint256 daoId, IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minCoinOut, uint256 minShares
     ) external nonReentrant returns (PersonalStakingHelper helper, uint256 shares) {
         if (amountIn == 0) revert ZeroAmount();
         helper = _getOrCreateHelper(daoId);
         tokenIn.safeTransferFrom(msg.sender, address(helper), amountIn);
-        shares = helper.zapAndStake(tokenIn, amountIn, aggregator, data, minShares);
+        shares = helper.zapAndStake(tokenIn, amountIn, aggregator, data, minCoinOut, minShares);
         emit Staked(daoId, msg.sender, address(helper), shares);
     }
 

@@ -77,17 +77,20 @@ contract PersonalStakingHelper is ReentrancyGuard {
     }
 
     /// @notice Executes the owner's swap, then deposits and stakes the entire Coin balance.
-    function zapAndStake(IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minShares)
+    function zapAndStake(IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minCoinOut, uint256 minShares)
         external
         onlyFactory
         nonReentrant
         returns (uint256 shares)
     {
         if (amountIn == 0) revert ZeroAmount();
+        uint256 minBalance = asset.balanceOf(address(this)) + minCoinOut;
         tokenIn.forceApprove(aggregator, amountIn);
         Address.functionCall(aggregator, data);
         tokenIn.forceApprove(aggregator, 0);
-        return _depositAndStake(asset.balanceOf(address(this)), minShares);
+        uint256 assets = asset.balanceOf(address(this));
+        if (assets < minBalance) revert InsufficientAssets(assets, minBalance);
+        return _depositAndStake(assets, minShares);
     }
 
     function _depositAndStake(uint256 assets, uint256 minShares) private returns (uint256 shares) {

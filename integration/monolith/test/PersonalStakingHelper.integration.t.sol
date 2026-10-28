@@ -177,7 +177,7 @@ contract PersonalStakingHelperIntegrationTest is Test {
         vm.startPrank(alice);
         input.approve(address(factory), 100e18);
         (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(
-            market.id, IERC20(address(input)), 100e18, address(router), data, quote
+            market.id, IERC20(address(input)), 100e18, address(router), data, 500e18, quote
         );
         assertEq(address(helper), predicted);
         assertEq(router.caller(), predicted);
