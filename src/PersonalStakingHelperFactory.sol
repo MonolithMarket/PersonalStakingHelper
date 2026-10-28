@@ -59,13 +59,31 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
         emit Staked(daoId, msg.sender, address(helper), shares);
     }
 
+    /// @notice Swaps the caller's ERC20 input into Coin and stakes through their helper.
+    function zapAndStake(
+        uint256 daoId, IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minShares
+    ) external nonReentrant returns (PersonalStakingHelper helper, uint256 shares) {
+        if (amountIn == 0) revert ZeroAmount();
+        helper = _getOrCreateHelper(daoId);
+        tokenIn.safeTransferFrom(msg.sender, address(helper), amountIn);
+        shares = helper.zapAndStake(tokenIn, amountIn, aggregator, data, minShares);
+        emit Staked(daoId, msg.sender, address(helper), shares);
+    }
+
+    /// @notice Quote recipient for aggregator calldata, including before the first deposit.
+    function predictHelper(uint256 daoId, address owner) external view returns (address) {
+        return Clones.predictDeterministicAddress(address(implementation), keccak256(abi.encode(daoId, owner)), address(this));
+    }
+
     function _getOrCreateHelper(uint256 daoId) private returns (PersonalStakingHelper helper) {
         helper = helperOf[daoId][msg.sender];
         if (address(helper) == address(0)) {
             ICoinDAOFactory.Deployment memory deployment = coinDAOFactory.deployments(daoId);
             if (deployment.vault == address(0)) revert InvalidPair();
             if (deployment.stakingToken != deployment.vault && deployment.stakingToken != deployment.coin) revert InvalidPair();
-            helper = PersonalStakingHelper(Clones.clone(address(implementation)));
+            helper = PersonalStakingHelper(
+                Clones.cloneDeterministic(address(implementation), keccak256(abi.encode(daoId, msg.sender)))
+            );
             helper.initialize(
                 msg.sender, IERC4626(deployment.vault), IStakingRewards(deployment.coinStakingRewards), deployment.staker
             );

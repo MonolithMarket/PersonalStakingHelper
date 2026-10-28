@@ -8,13 +8,17 @@ import {
     LenderStub,
     PersonalStakingHelper,
     PersonalStakingHelperFactory,
+    IERC20,
     IERC4626,
     StakingRewards,
     TestMarket
 } from "./HelperFixture.sol";
+import {SwapRouterStub} from "./helpers/SwapRouterStub.sol";
 
 contract HelperHandler is Test {
     PersonalStakingHelperFactory public immutable factory;
+    MockToken public immutable zapInput;
+    SwapRouterStub public immutable router;
     TestMarket[2] internal markets;
     uint256[2] public daoIds;
     address[3] public actors;
@@ -26,10 +30,16 @@ contract HelperHandler is Test {
 
     constructor(PersonalStakingHelperFactory factory_, uint256[2] memory daoIds_, TestMarket[2] memory markets_) {
         factory = factory_;
+        zapInput = new MockToken("Swap input");
+        router = new SwapRouterStub();
         daoIds = daoIds_;
         markets = markets_;
         actors = [address(0xA11CE), address(0xB0B), address(0xCA401)];
+        for (uint256 j; j < markets.length; ++j) markets[j].token.mint(address(router), 1e32);
         for (uint256 i; i < actors.length; ++i) {
+            zapInput.mint(actors[i], 1e32);
+            vm.prank(actors[i]);
+            zapInput.approve(address(factory), type(uint256).max);
             for (uint256 j; j < markets.length; ++j) {
                 markets[j].token.mint(actors[i], 1e32);
                 vm.prank(actors[i]);
@@ -72,6 +82,22 @@ contract HelperHandler is Test {
         assertEq(market.gov.balanceOf(actor) - beforeGov, claimRewards ? reward : 0);
         expectedShares[id][actor] -= shares;
         withdrawals++;
+    }
+
+    function zap(uint256 marketSeed, uint256 actorSeed, uint256 amountSeed) external {
+        uint256 index = marketSeed % markets.length;
+        uint256 id = daoIds[index];
+        TestMarket memory market = markets[index];
+        address actor = actors[actorSeed % 3];
+        uint256 amount = 1e18 + amountSeed % 1e24;
+        uint256 quote = market.vault.previewDeposit(amount);
+        if (quote == 0) return;
+        bytes memory data = abi.encodeCall(router.swap, (zapInput, market.token, amount, amount, factory.predictHelper(id, actor)));
+        vm.prank(actor);
+        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(id, zapInput, amount, address(router), data, quote);
+        expectedShares[id][actor] += shares;
+        assertEq(zapInput.balanceOf(address(helper)), 0);
+        assertEq(zapInput.allowance(address(helper), address(router)), 0);
     }
 
     function restake(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed) external {
@@ -144,13 +170,14 @@ contract PersonalStakingHelperInvariantTest is HelperFixture {
         markets[0] = TestMarket(token, gov, lender, vault, pool);
         (daoIds[1], markets[1]) = createDAO("SecondToken", true);
         handler = new HelperHandler(factory, daoIds, markets);
-        bytes4[] memory selectors = new bytes4[](6);
+        bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = handler.deposit.selector;
         selectors[1] = handler.withdraw.selector;
         selectors[2] = handler.redeem.selector;
         selectors[3] = handler.claim.selector;
         selectors[4] = handler.accrue.selector;
         selectors[5] = handler.restake.selector;
+        selectors[6] = handler.zap.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }

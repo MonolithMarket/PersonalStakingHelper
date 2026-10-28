@@ -14,6 +14,7 @@ fs_permissions = [{ access = "read", path = "../../out" }]
 remappings = [
     "monolith/=../../lib/monolith/src/",
     "periphery/=../../src/",
+    "test-helpers/=../../test/helpers/",
     "../../lib/monolith/:src/=../../lib/monolith/src/",
     "lib/solmate/=../../lib/monolith/lib/solmate/",
     "forge-std/=../../lib/forge-std/src/",

@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IStakingRewards, IStakedGovToken} from "./interfaces/IStakingRewards.sol";
 
 /// @notice One owner's position in a fixed Monolith vault and existing rewards pool.
@@ -72,6 +73,24 @@ contract PersonalStakingHelper is ReentrancyGuard {
         nonReentrant
         returns (uint256 shares)
     {
+        return _depositAndStake(assets, minShares);
+    }
+
+    /// @notice Executes the owner's swap, then deposits and stakes the entire Coin balance.
+    function zapAndStake(IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minShares)
+        external
+        onlyFactory
+        nonReentrant
+        returns (uint256 shares)
+    {
+        if (amountIn == 0) revert ZeroAmount();
+        tokenIn.forceApprove(aggregator, amountIn);
+        Address.functionCall(aggregator, data);
+        tokenIn.forceApprove(aggregator, 0);
+        return _depositAndStake(asset.balanceOf(address(this)), minShares);
+    }
+
+    function _depositAndStake(uint256 assets, uint256 minShares) private returns (uint256 shares) {
         if (assets == 0) revert ZeroAmount();
         IERC20 stakingToken = IERC20(stakingRewards.stakingToken());
         shares = assets;

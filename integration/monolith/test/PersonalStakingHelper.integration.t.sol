@@ -10,6 +10,7 @@ import {ICoinDAOFactory} from "periphery/interfaces/ICoinDAOFactory.sol";
 import {IStakingRewards} from "periphery/interfaces/IStakingRewards.sol";
 import {PersonalStakingHelper} from "periphery/PersonalStakingHelper.sol";
 import {PersonalStakingHelperFactory} from "periphery/PersonalStakingHelperFactory.sol";
+import {SwapRouterStub} from "test-helpers/SwapRouterStub.sol";
 
 interface IRealCoinDAOFactory is ICoinDAOFactory {
     function deploymentsLength() external view returns (uint256);
@@ -158,6 +159,42 @@ contract PersonalStakingHelperIntegrationTest is Test {
         assertEq(market.gov.balanceOf(alice), newReward);
         market.pool.getReward();
         assertEq(market.gov.balanceOf(alice), oldReward + newReward);
+        vm.stopPrank();
+        _assertClean(market, helper);
+    }
+
+    function test_ZapIntoRealMarketEarnsYieldAndGovAndExits() public {
+        Market memory market = _launch(true);
+        _borrowAndApprove(market, bob, 1000e18);
+        SwapRouterStub router = new SwapRouterStub();
+        vm.prank(bob);
+        market.token.transfer(address(router), 500e18);
+        IntegrationCollateral input = new IntegrationCollateral();
+        input.mint(alice, 100e18);
+        address predicted = factory.predictHelper(market.id, alice);
+        bytes memory data = abi.encodeCall(router.swap, (IERC20(address(input)), market.token, 100e18, 500e18, predicted));
+        uint256 quote = market.vault.previewDeposit(500e18);
+        vm.startPrank(alice);
+        input.approve(address(factory), 100e18);
+        (PersonalStakingHelper helper, uint256 shares) = factory.zapAndStake(
+            market.id, IERC20(address(input)), 100e18, address(router), data, quote
+        );
+        assertEq(address(helper), predicted);
+        assertEq(router.caller(), predicted);
+        assertEq(helper.owner(), alice);
+        assertEq(helper.stakedShares(), shares);
+        assertEq(shares, quote);
+        assertEq(input.balanceOf(alice), 0);
+        assertEq(input.allowance(predicted, address(router)), 0);
+        assertEq(market.token.balanceOf(bob), 500e18);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        quote = market.vault.previewRedeem(shares);
+        assertGt(quote, 500e18);
+        uint256 reward = helper.earned();
+        assertGt(reward, 0);
+        assertEq(helper.withdrawAndRedeem(shares, quote, true), quote);
+        assertEq(market.token.balanceOf(alice), quote);
+        assertEq(market.gov.balanceOf(alice), reward);
         vm.stopPrank();
         _assertClean(market, helper);
     }

@@ -43,6 +43,26 @@ or redemption, and creates or reuses the same personal helper. For direct-Coin
 pools, the same method accepts Coin. Only the supplied amount is staked; loose
 tokens already at the helper remain recoverable by its owner.
 
+For a swap into Coin, call
+`zapAndStake(daoId, tokenIn, amountIn, aggregator, data, minShares)` on the
+factory after approving its ERC20 input allowance. The factory funds the caller's
+helper; that helper approves the aggregator for exactly `amountIn`, executes the
+calldata, clears the approval, and deposits and stakes its entire Coin balance.
+The swap and staking steps succeed or revert together. This route emits the
+factory's `Staked` event and the helper's `DepositedAndStaked` event.
+
+Use `predictHelper(daoId, owner)` as the swap caller and Coin recipient when
+building calldata, even before the helper exists. Clones are deployed with a
+salt derived from the DAO ID and owner, so other users' deposits cannot change
+that address. A predicted address does not establish that a DAO is eligible.
+
+The aggregator must spend the approved ERC20 itself and return Coin to the
+helper. Native-ETH inputs and separate approval-spender contracts are not part
+of this interface. Use trusted router addresses and calldata, including the
+swap's own minimum output; `minShares` applies to the entire Coin balance,
+including Coin previously sent to this owner's helper. No generic refund flow
+is added: any unspent input remains recoverable through `recoverToken`.
+
 Owner actions on the helper:
 
 | Method | Result |
@@ -80,7 +100,10 @@ stakes are separate positions. This helper creates no transferable receipt token
 ## Security assumptions
 
 Owner and market are fixed during atomic helper creation. There is no admin,
-upgrade path, ownership transfer or arbitrary-call function. Withdrawals,
+upgrade path or ownership transfer. Swap calldata is authorized by the owner
+through the factory and executes by ordinary call in that owner's helper,
+never in the shared factory. It must be treated as access to that helper's
+assets, not as permission to call an untrusted router. Withdrawals,
 rewards and recovered tokens always go to the owner. Helper allowances are
 exact and cleared after use; entry points use reentrancy guards.
 
@@ -115,5 +138,5 @@ Tests cover ownership, initialization, slippage, claims and failed payouts,
 reentrancy, donations, multiple users/DAOs, fuzzed exits and stateful invariants.
 Full integration scenarios launch actual Monolith lending markets and
 CoinDAOFactory rewards pools, including existing-market attachment. Only their
-external collateral and price feed are simulated. CI also runs the pinned
-governance regression suite.
+external collateral, price feed and the zap's swap router are simulated.
+CI also runs the pinned governance regression suite.
