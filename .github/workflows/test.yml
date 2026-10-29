@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.5
+      - name: Build actual Monolith contracts
+        run: forge build --root integration/monolith --use 0.8.24
+      - name: Test personal staking helpers
+        run: forge test --use 0.8.26 -vv
+      - name: Test real Monolith and CoinDAO integration
+        working-directory: integration/monolith
+        run: forge test --use 0.8.24 -vv
+      - name: Test pinned governance dependency
+        run: forge test --root lib/monolith-gov --use 0.8.26 -vv
