@@ -163,6 +163,70 @@ contract PersonalStakingHelperIntegrationTest is Test {
         _assertClean(market, helper);
     }
 
+    function test_ReceiverCoinDepositsInRealVaultAndDirectPools() public {
+        for (uint256 i; i < 2; ++i) {
+            bool stakeVault = i == 0;
+            Market memory market = _launch(stakeVault);
+            _borrowAndApprove(market, alice, 1000e18);
+            uint256 expected = stakeVault ? market.vault.previewDeposit(500e18) : 500e18;
+            vm.prank(alice);
+            (PersonalStakingHelper helper, uint256 shares) = factory.depositAndStake(market.id, 500e18, expected, bob);
+            assertEq(address(helper), factory.predictHelper(market.id, bob));
+            assertEq(helper.owner(), bob);
+            assertEq(address(factory.helperOf(market.id, alice)), address(0));
+            assertEq(helper.stakedShares(), expected);
+            assertEq(shares, expected);
+            assertEq(market.token.balanceOf(alice), 500e18);
+            assertEq(market.token.balanceOf(bob), 0);
+            vm.warp(vm.getBlockTimestamp() + 1 days);
+            uint256 reward = helper.earned();
+            assertGt(reward, 0);
+            vm.prank(alice);
+            vm.expectRevert(PersonalStakingHelper.OnlyOwner.selector);
+            helper.withdraw(shares, false);
+            uint256 received = stakeVault ? market.vault.previewRedeem(shares) : shares;
+            vm.prank(bob);
+            if (stakeVault) {
+                assertGt(received, 500e18);
+                assertEq(helper.withdrawAndRedeem(shares, received, true), received);
+            } else helper.withdraw(shares, true);
+            assertEq(market.token.balanceOf(bob), received);
+            assertEq(market.gov.balanceOf(bob), reward);
+            assertEq(market.gov.balanceOf(alice), 0);
+            assertEq(helper.stakedShares(), 0);
+            _assertClean(market, helper);
+        }
+    }
+
+    function test_ReceiverSCoinEntryInRealMarket() public {
+        Market memory market = _launch(true);
+        _borrowAndApprove(market, alice, 1000e18);
+        vm.startPrank(alice);
+        market.token.approve(address(market.vault), 500e18);
+        uint256 shares = market.vault.deposit(500e18, alice);
+        uint256 supply = market.vault.totalSupply();
+        market.vault.approve(address(factory), shares);
+        PersonalStakingHelper helper = factory.stake(market.id, shares, bob);
+        vm.stopPrank();
+        assertEq(helper.owner(), bob);
+        assertEq(address(helper), factory.predictHelper(market.id, bob));
+        assertEq(address(factory.helperOf(market.id, alice)), address(0));
+        assertEq(helper.stakedShares(), shares);
+        assertEq(market.vault.totalSupply(), supply);
+        assertEq(market.token.balanceOf(alice), 500e18);
+        assertEq(market.vault.balanceOf(alice), 0);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 reward = helper.earned();
+        assertGt(reward, 0);
+        vm.prank(bob);
+        helper.withdraw(shares, true);
+        assertEq(market.vault.balanceOf(bob), shares);
+        assertEq(market.gov.balanceOf(bob), reward);
+        assertEq(market.gov.balanceOf(alice), 0);
+        assertEq(helper.stakedShares(), 0);
+        _assertClean(market, helper);
+    }
+
     function test_ZapIntoRealMarketEarnsYieldAndGovAndExits() public {
         Market memory market = _launch(true);
         _borrowAndApprove(market, bob, 1000e18);

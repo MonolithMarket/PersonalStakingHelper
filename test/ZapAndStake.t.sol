@@ -175,7 +175,7 @@ contract ZapAndStakeTest is HelperFixture {
     }
 
     function test_AggregatorCannotReenterSharedFactory() public {
-        router.setCallback(address(factory), abi.encodeCall(factory.depositAndStake, (daoId, 1, 0)));
+        router.setCallback(address(factory), abi.encodeWithSignature("depositAndStake(uint256,uint256,uint256)", daoId, 1, 0));
         (PersonalStakingHelper helper,) = _zap(100e6, 100e18, 0);
         assertFalse(router.callbackSuccess());
         assertEq(router.callbackResult(), abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector));

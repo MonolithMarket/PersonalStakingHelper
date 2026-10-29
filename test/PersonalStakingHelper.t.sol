@@ -470,7 +470,7 @@ contract PersonalStakingHelperTest is HelperFixture {
     }
 
     function test_FactoryRejectsTokenCallbackReentrancy() public {
-        token.setHook(alice, address(factory), abi.encodeCall(factory.depositAndStake, (daoId, 1e18, 0)));
+        token.setHook(alice, address(factory), abi.encodeWithSignature("depositAndStake(uint256,uint256,uint256)", daoId, 1e18, 0));
         (PersonalStakingHelper helper,) = deposit(alice, 100e18);
         assertFalse(token.callbackSuccess());
         assertEq(token.callbackResult(), abi.encodeWithSelector(ReentrancyGuard.ReentrancyGuardReentrantCall.selector));

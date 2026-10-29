@@ -35,7 +35,11 @@ incompatible registry requires a separate helper factory.
 
 `daoId` is the CoinDAOFactory deployment index, not the Monolith market index.
 Approval is a separate transaction unless the user's smart account batches it.
-The caller funds and owns the position; there is no arbitrary payer or receiver.
+The caller funds and owns the position by default. To fund someone else's
+position, use `depositAndStake(daoId, assets, minShares, receiver)` or
+`stake(daoId, shares, receiver)`. Funds always come from the caller; the receiver
+owns the helper and all withdrawal and reward rights. These routes create or
+reuse `helperOf(daoId, receiver)`, and factory events identify that owner.
 
 For existing sCoin, approve sCoin to the factory and call `stake(daoId, shares)`.
 This stakes the pool's configured token directly, without another vault deposit
@@ -53,6 +57,8 @@ cannot satisfy it. `minShares` separately bounds the stake from the full final
 balance. Zero `minCoinOut` permits no increase but still rejects a balance decrease.
 The swap and staking steps succeed or revert together. This route emits the
 factory's `Staked` event and the helper's `DepositedAndStaked` event.
+The zap has no receiver overload: only the owner can authorize swap calldata
+through their own helper.
 
 Use `predictHelper(daoId, owner)` as the swap caller and Coin recipient when
 building calldata, even before the helper exists. Clones are deployed with a

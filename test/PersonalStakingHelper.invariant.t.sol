@@ -48,18 +48,19 @@ contract HelperHandler is Test {
         }
     }
 
-    function deposit(uint256 marketSeed, uint256 actorSeed, uint256 amountSeed) external {
+    function deposit(uint256 marketSeed, uint256 actorSeed, uint256 amountSeed, uint256 receiverSeed) external {
         uint256 index = marketSeed % markets.length;
         uint256 id = daoIds[index];
         TestMarket memory market = markets[index];
         address actor = actors[actorSeed % 3];
+        address receiver = actors[receiverSeed % 3];
         // Keep deposits well above rounding dust even after arbitrary yield additions.
         uint256 amount = 1e18 + amountSeed % 1e24;
         uint256 quote = market.vault.previewDeposit(amount);
         if (quote == 0) return;
         vm.prank(actor);
-        (, uint256 shares) = factory.depositAndStake(id, amount, quote);
-        expectedShares[id][actor] += shares;
+        (, uint256 shares) = factory.depositAndStake(id, amount, quote, receiver);
+        expectedShares[id][receiver] += shares;
         deposits++;
     }
 
@@ -100,19 +101,20 @@ contract HelperHandler is Test {
         assertEq(zapInput.allowance(address(helper), address(router)), 0);
     }
 
-    function restake(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed) external {
+    function restake(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed, uint256 receiverSeed) external {
         uint256 index = marketSeed % markets.length;
         uint256 id = daoIds[index];
         IERC4626 vault = markets[index].vault;
         address actor = actors[actorSeed % 3];
+        address receiver = actors[receiverSeed % 3];
         uint256 balance = vault.balanceOf(actor);
         if (balance == 0) return;
         uint256 shares = 1 + sharesSeed % balance;
         vm.startPrank(actor);
         vault.approve(address(factory), shares);
-        factory.stake(id, shares);
+        factory.stake(id, shares, receiver);
         vm.stopPrank();
-        expectedShares[id][actor] += shares;
+        expectedShares[id][receiver] += shares;
     }
 
     function redeem(uint256 marketSeed, uint256 actorSeed, uint256 sharesSeed, bool claimRewards) external {
