@@ -6,34 +6,46 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
 import {ICoinDAOFactory} from "./interfaces/ICoinDAOFactory.sol";
 import {PersonalStakingHelper} from "./PersonalStakingHelper.sol";
 
 /// @notice Token or sToken staking for GOV rewards, with one helper per owner and CoinDAO.
-/// @dev One fixed, trusted CoinDAOFactory registry. No admin or upgrade path.
-contract PersonalStakingHelperFactory is ReentrancyGuard {
+/// @dev Fixed registry and helper implementation. The owner only manages zap routers.
+contract PersonalStakingHelperFactory is ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     ICoinDAOFactory public immutable coinDAOFactory;
     PersonalStakingHelper public immutable implementation;
     mapping(uint256 daoId => mapping(address owner => PersonalStakingHelper helper)) public helperOf;
+    mapping(address router => bool allowed) public allowedRouters;
 
     error InvalidFactory();
     error InvalidPair();
     error ZeroAmount();
     error ZeroAddress();
+    error InvalidRouter();
+    error RouterNotAllowed(address router);
 
+    event RouterSet(address indexed router, bool allowed);
     event HelperCreated(uint256 indexed daoId, address indexed owner, address indexed helper);
     event DepositedAndStaked(
         uint256 indexed daoId, address indexed owner, address indexed helper, uint256 assets, uint256 shares
     );
     event Staked(uint256 indexed daoId, address indexed owner, address indexed helper, uint256 shares);
 
-    constructor(ICoinDAOFactory coinDAOFactory_) {
+    constructor(ICoinDAOFactory coinDAOFactory_, address routerAdmin) Ownable(routerAdmin) {
         if (address(coinDAOFactory_).code.length == 0) revert InvalidFactory();
         coinDAOFactory = coinDAOFactory_;
         implementation = new PersonalStakingHelper();
+    }
+
+    /// @notice Enables or disables a vetted swap router. All routers start disabled.
+    function setRouter(address router, bool allowed) external onlyOwner {
+        if (allowed && router.code.length == 0) revert InvalidRouter();
+        allowedRouters[router] = allowed;
+        emit RouterSet(router, allowed);
     }
 
     /// @notice Approve this factory for Token, then deposit for your own address.
@@ -77,6 +89,7 @@ contract PersonalStakingHelperFactory is ReentrancyGuard {
         uint256 daoId, IERC20 tokenIn, uint256 amountIn, address aggregator, bytes calldata data, uint256 minCoinOut, uint256 minShares
     ) external nonReentrant returns (PersonalStakingHelper helper, uint256 shares) {
         if (amountIn == 0) revert ZeroAmount();
+        if (!allowedRouters[aggregator]) revert RouterNotAllowed(aggregator);
         helper = _getOrCreateHelper(daoId, msg.sender);
         tokenIn.safeTransferFrom(msg.sender, address(helper), amountIn);
         shares = helper.zapAndStake(tokenIn, amountIn, aggregator, data, minCoinOut, minShares);

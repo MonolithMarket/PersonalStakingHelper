@@ -133,7 +133,7 @@ abstract contract HelperFixture is Test {
         lender = market.lender;
         vault = market.vault;
         pool = market.pool;
-        factory = new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)));
+        factory = new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), address(this));
         fundAndApprove(market, alice, 1e30);
         fundAndApprove(market, bob, 1e30);
     }

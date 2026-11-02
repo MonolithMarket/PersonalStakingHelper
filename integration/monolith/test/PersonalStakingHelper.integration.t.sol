@@ -81,7 +81,7 @@ contract PersonalStakingHelperIntegrationTest is Test {
         );
         deployer = ICoinDAOTestDeployer(_deployCoinDAOCode("CoinDAOTestDeployer"));
         factory = PersonalStakingHelperFactory(
-            deployCode(_artifact("PersonalStakingHelperFactory"), abi.encode(address(registry)))
+            deployCode(_artifact("PersonalStakingHelperFactory"), abi.encode(address(registry), address(this)))
         );
     }
 
@@ -227,10 +227,11 @@ contract PersonalStakingHelperIntegrationTest is Test {
         _assertClean(market, helper);
     }
 
-    function test_ZapIntoRealMarketEarnsYieldAndGovAndExits() public {
+    function test_ZapIntoRealMarketEarnsYieldAndGovAndExitsAfterRouterRemoval() public {
         Market memory market = _launch(true);
         _borrowAndApprove(market, bob, 1000e18);
         SwapRouterStub router = new SwapRouterStub();
+        factory.setRouter(address(router), true);
         vm.prank(bob);
         market.token.transfer(address(router), 500e18);
         IntegrationCollateral input = new IntegrationCollateral();
@@ -251,6 +252,11 @@ contract PersonalStakingHelperIntegrationTest is Test {
         assertEq(input.balanceOf(alice), 0);
         assertEq(input.allowance(predicted, address(router)), 0);
         assertEq(market.token.balanceOf(bob), 500e18);
+        vm.stopPrank();
+        factory.setRouter(address(router), false);
+        vm.startPrank(alice);
+        vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelperFactory.RouterNotAllowed.selector, address(router)));
+        factory.zapAndStake(market.id, IERC20(address(input)), 100e18, address(router), data, 500e18, quote);
         vm.warp(vm.getBlockTimestamp() + 1 days);
         quote = market.vault.previewRedeem(shares);
         assertGt(quote, 500e18);

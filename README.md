@@ -11,9 +11,17 @@ and [GovernanceFactory #12](https://github.com/MonolithMarket/GovernanceFactory/
 
 ## Deployment
 
-Deploy `PersonalStakingHelperFactory(coinDAOFactory)` once per trusted
+Deploy `PersonalStakingHelperFactory(coinDAOFactory, routerAdmin)` once per trusted
 CoinDAOFactory and chain. The constructor creates the shared implementation.
-Verify the registry address and chain before deployment.
+Use a trusted multisig for `routerAdmin`. Verify the registry, admin and chain
+before deployment.
+
+All zap routers start disabled. The admin enables vetted swap routers with
+`setRouter(router, true)` and removes them with `setRouter(router, false)`.
+Read `allowedRouters(router)` to check availability; changes emit `RouterSet`.
+Removal blocks future zaps through that router; plain deposits, staking, claims
+and withdrawals remain available. Router changes apply to every supported DAO,
+so adding an aggregator needs no new factory or user helper.
 
 The factory supports existing and future DAO records whose staking token is
 their Coin or Monolith vault. Each helper is also bound to its DAO's registered
@@ -40,6 +48,10 @@ position, use `depositAndStake(daoId, assets, minShares, receiver)` or
 `stake(daoId, shares, receiver)`. Funds always come from the caller; the receiver
 owns the helper and all withdrawal and reward rights. These routes create or
 reuse `helperOf(daoId, receiver)`, and factory events identify that owner.
+The receiver must be a wallet or contract able to call the helper's owner
+functions. Contract receivers must restrict who can initiate those calls.
+Do not pass a helper address or `predictHelper` output as the receiver;
+funding an owner that cannot act has no general recovery path.
 
 For existing sCoin, approve sCoin to the factory and call `stake(daoId, shares)`.
 This stakes the pool's configured token directly, without another vault deposit
@@ -66,11 +78,15 @@ salt derived from the DAO ID and owner, so other users' deposits cannot change
 that address. A predicted address does not establish that a DAO is eligible.
 
 The aggregator must spend the approved ERC20 itself and return Coin to the
-helper. Native-ETH inputs and separate approval-spender contracts are not part
+helper, and must be enabled in the factory's `allowedRouters`. Unlisted targets
+are rejected before funds move or a helper is created.
+Native-ETH inputs and separate approval-spender contracts are not part
 of this interface. Use trusted router addresses and calldata, including the
 swap's own minimum output. Set `minCoinOut` from the swap quote; `minShares` applies to the entire Coin balance,
-including Coin previously sent to this owner's helper. No generic refund flow
-is added: any unspent input remains recoverable through `recoverToken`.
+including Coin previously sent to this owner's helper. Unspent non-Coin input
+remains recoverable through `recoverToken`. If Coin itself is the input, its
+unspent balance is staked too and `minCoinOut` measures the net increase after
+funding. Use `depositAndStake` for ordinary Coin entry.
 
 Owner actions on the helper:
 
@@ -108,13 +124,23 @@ stakes are separate positions. This helper creates no transferable receipt token
 
 ## Security assumptions
 
-Owner and market are fixed during atomic helper creation. There is no admin,
-upgrade path or ownership transfer. Swap calldata is authorized by the owner
+Each helper's owner and market are fixed during atomic creation, with no
+upgrade path or ownership transfer. The factory's OpenZeppelin `Ownable` admin
+only manages zap targets. Transferring factory ownership changes that admin;
+renouncing it freezes the current router list. Neither operation changes helper
+ownership or withdrawal rights.
+
+The admin must list only vetted swap routers. Listing a token, vault, pool,
+GOV staker or helper can re-enable arbitrary calls and persistent approvals.
+Removing an entry does not revoke token approvals left by earlier calls.
+Approved router behavior, including any proxy upgrades, remains trusted.
+Swap calldata is authorized by the owner
 through the factory and executes by ordinary call in that owner's helper,
 never in the shared factory. It must be treated as access to that helper's
 assets, not as permission to call an untrusted router. Withdrawals,
-rewards and recovered tokens always go to the owner. Helper allowances are
-exact and cleared after use; entry points use reentrancy guards.
+rewards and recovered tokens always go to the owner. Approvals made by the
+helper's own entry and GOV-staking code are exact and cleared or consumed;
+entry points use reentrancy guards.
 
 The registry and its linked Monolith, StakingRewards and GOV staking
 implementations are trusted. Coin and GOV must transfer exact amounts and maintain stable balances;

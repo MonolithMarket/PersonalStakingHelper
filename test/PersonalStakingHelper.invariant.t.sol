@@ -172,6 +172,7 @@ contract PersonalStakingHelperInvariantTest is HelperFixture {
         markets[0] = TestMarket(token, gov, lender, vault, pool);
         (daoIds[1], markets[1]) = createDAO("SecondToken", true);
         handler = new HelperHandler(factory, daoIds, markets);
+        factory.setRouter(address(handler.router()), true);
         bytes4[] memory selectors = new bytes4[](7);
         selectors[0] = handler.deposit.selector;
         selectors[1] = handler.withdraw.selector;
