@@ -150,7 +150,6 @@ contract PersonalStakingHelper is ReentrancyGuard {
         if (amount != 0) {
             rewardToken.forceApprove(address(govStaking), amount);
             if (!govStaking.depositFor(owner, amount)) revert StakeFailed();
-            rewardToken.forceApprove(address(govStaking), 0);
         }
         emit RewardStaked(amount);
     }
@@ -178,7 +177,6 @@ contract PersonalStakingHelper is ReentrancyGuard {
         gov.forceApprove(address(compoundVault), amount);
         shares = compoundVault.deposit(amount, owner);
         if (shares == 0 || shares < minShares) revert InsufficientShares(shares, minShares);
-        gov.forceApprove(address(compoundVault), 0);
 
         emit RewardCompounded(address(compoundVault), amount, shares);
     }
