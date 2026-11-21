@@ -99,11 +99,14 @@ contract PersonalStakingHelperTest is HelperFixture {
         vm.warp(block.timestamp + 1 days);
         uint256 quoted = vault.previewRedeem(shares);
         assertGt(quoted, 100e18);
+        deposit(alice, 1e18);
+        uint256 fullQuote = vault.previewRedeem(helper.stakedShares());
+        assertGt(fullQuote, quoted);
         uint256 beforeBalance = token.balanceOf(alice);
         vm.prank(alice);
-        uint256 redeemed = helper.withdrawAndRedeem(shares, quoted, false);
-        assertEq(redeemed, quoted);
-        assertEq(token.balanceOf(alice) - beforeBalance, quoted);
+        uint256 redeemed = helper.withdrawAndRedeem(type(uint256).max, quoted, false);
+        assertEq(redeemed, fullQuote);
+        assertEq(token.balanceOf(alice) - beforeBalance, fullQuote);
         assertEq(pool.balanceOf(address(helper)), 0);
         assertGt(pool.earned(address(helper)), 0);
         vm.prank(alice);
@@ -123,7 +126,7 @@ contract PersonalStakingHelperTest is HelperFixture {
         assertEq(helper.earned(), rewards);
         assertEq(gov.balanceOf(alice), 0);
         vm.prank(alice);
-        helper.withdraw(shares - shares / 2, false);
+        helper.withdraw(type(uint256).max, false);
         vm.prank(alice);
         helper.claim();
         assertEq(gov.balanceOf(alice), rewards);
@@ -158,14 +161,15 @@ contract PersonalStakingHelperTest is HelperFixture {
         assertGt(reward, 0);
         gov.mint(address(helper), 7e18);
         uint256 withdrawn = fullExit ? shares : shares / 2;
+        uint256 requested = fullExit ? type(uint256).max : withdrawn;
         uint256 quote = vault.previewRedeem(withdrawn);
         uint256 beforeTokens = token.balanceOf(alice);
 
         vm.prank(alice);
         if (redeem) {
-            assertEq(helper.withdrawAndRedeem(withdrawn, quote, claimRewards), quote);
+            assertEq(helper.withdrawAndRedeem(requested, quote, claimRewards), quote);
         } else {
-            helper.withdraw(withdrawn, claimRewards);
+            helper.withdraw(requested, claimRewards);
         }
 
         assertEq(token.balanceOf(alice) - beforeTokens, redeem ? quote : 0);

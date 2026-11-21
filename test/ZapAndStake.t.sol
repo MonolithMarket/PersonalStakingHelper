@@ -186,18 +186,21 @@ contract ZapAndStakeTest is HelperFixture {
         assertClean(helper);
     }
 
-    function test_PartialInputSpendClearsAllowanceAndRemainsOwnerRecoverable() public {
+    function test_PartialInputSpendRefundsNewInputAndLeavesEarlierBalanceRecoverable() public {
         address predicted = factory.predictHelper(daoId, alice);
+        input.mint(predicted, 7e6);
+        uint256 beforeInput = input.balanceOf(alice);
+
         vm.prank(alice);
         (PersonalStakingHelper helper,) = factory.zapAndStake(
             daoId, input, 100e6, address(router), _data(40e6, 100e18, predicted), 100e18, 0
         );
-        assertEq(input.balanceOf(predicted), 60e6);
+        assertEq(input.balanceOf(alice), beforeInput - 40e6);
+        assertEq(input.balanceOf(predicted), 7e6);
         assertEq(input.allowance(predicted, address(router)), 0);
-        uint256 beforeInput = input.balanceOf(alice);
         vm.prank(alice);
-        helper.recoverToken(input);
-        assertEq(input.balanceOf(alice), beforeInput + 60e6);
+        assertEq(helper.recoverToken(input), 7e6);
+        assertEq(input.balanceOf(predicted), 0);
         assertClean(helper);
     }
 
@@ -259,6 +262,7 @@ contract ZapAndStakeTest is HelperFixture {
     function test_CoinBalanceDecreaseRevertsEvenWithZeroMinimum() public {
         (PersonalStakingHelper helper,) = deposit(alice, 100e18);
         token.mint(address(helper), 100e18);
+        input.mint(address(helper), 100e6);
         uint256 bobBefore = token.balanceOf(bob);
         bytes memory data = abi.encodeCall(token.transfer, (bob, 1e18));
         // Exercise the helper's output guard independently of the factory's router gate.
@@ -272,12 +276,13 @@ contract ZapAndStakeTest is HelperFixture {
     function test_FailedOutputMinimumRollsBackUnrelatedTokenApproval() public {
         (PersonalStakingHelper helper,) = deposit(alice, 100e18);
         token.mint(address(helper), 100e18);
+        input.mint(address(helper), 100e6);
         bytes memory data = abi.encodeCall(gov.approve, (bob, type(uint256).max));
         vm.prank(address(factory));
         vm.expectRevert(abi.encodeWithSelector(PersonalStakingHelper.InsufficientAssets.selector, 100e18, 100e18 + 1));
         helper.zapAndStake(input, 100e6, address(gov), data, 1, 0);
         assertEq(gov.allowance(address(helper), bob), 0);
-        assertEq(input.balanceOf(address(helper)), 0);
+        assertEq(input.balanceOf(address(helper)), 100e6);
     }
 
     function test_InitialAdminIsExplicitAndCannotBeZero() public {

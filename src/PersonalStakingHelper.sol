@@ -33,6 +33,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
     error NotVaultStaking();
     error InvalidYearnRegistry();
     error InvalidCompoundVault();
+    error StakeFailed();
     error InsufficientShares(uint256 received, uint256 minimum);
     error InsufficientAssets(uint256 received, uint256 minimum);
 
@@ -94,12 +95,18 @@ contract PersonalStakingHelper is ReentrancyGuard {
     {
         if (amountIn == 0) revert ZeroAmount();
         uint256 minBalance = asset.balanceOf(address(this)) + minCoinOut;
+        uint256 priorInput = tokenIn.balanceOf(address(this)) - amountIn;
         tokenIn.forceApprove(aggregator, amountIn);
         Address.functionCall(aggregator, data);
         tokenIn.forceApprove(aggregator, 0);
         uint256 assets = asset.balanceOf(address(this));
         if (assets < minBalance) revert InsufficientAssets(assets, minBalance);
-        return _depositAndStake(assets, minShares);
+        shares = _depositAndStake(assets, minShares);
+
+        if (tokenIn != asset) {
+            uint256 refund = tokenIn.balanceOf(address(this)) - priorInput;
+            if (refund != 0) tokenIn.safeTransfer(owner, refund);
+        }
     }
 
     function _depositAndStake(uint256 assets, uint256 minShares) private returns (uint256 shares) {
@@ -142,7 +149,8 @@ contract PersonalStakingHelper is ReentrancyGuard {
         amount = rewardToken.balanceOf(address(this));
         if (amount != 0) {
             rewardToken.forceApprove(address(govStaking), amount);
-            govStaking.depositFor(owner, amount);
+            if (!govStaking.depositFor(owner, amount)) revert StakeFailed();
+            rewardToken.forceApprove(address(govStaking), 0);
         }
         emit RewardStaked(amount);
     }
@@ -176,16 +184,17 @@ contract PersonalStakingHelper is ReentrancyGuard {
     }
 
     /// @notice Unstakes the pool's Token or sToken to the owner and optionally claims GOV.
+    /// @param shares The amount to withdraw. Pass max uint256 to withdraw the full position.
     /// @dev With claimRewards=false, GOV claims cannot block the withdrawal.
     function withdraw(uint256 shares, bool claimRewards) external onlyOwner nonReentrant {
-        if (shares == 0) revert ZeroAmount();
-        stakingRewards.withdraw(shares);
+        shares = _unstake(shares);
         IERC20(stakingRewards.stakingToken()).safeTransfer(owner, shares);
         emit Withdrawn(shares);
         if (claimRewards) _claim();
     }
 
     /// @notice Unstakes and redeems to Token for the owner and optionally claims GOV.
+    /// @param shares The amount to redeem. Pass max uint256 to redeem the full position.
     /// @dev With claimRewards=false, GOV claims cannot block the withdrawal.
     function withdrawAndRedeem(uint256 shares, uint256 minAssets, bool claimRewards)
         external
@@ -194,12 +203,18 @@ contract PersonalStakingHelper is ReentrancyGuard {
         returns (uint256 assets)
     {
         if (stakingRewards.stakingToken() != address(vault)) revert NotVaultStaking();
-        if (shares == 0) revert ZeroAmount();
-        stakingRewards.withdraw(shares);
+        shares = _unstake(shares);
         assets = vault.redeem(shares, owner, address(this));
         if (assets < minAssets) revert InsufficientAssets(assets, minAssets);
         emit WithdrawnAndRedeemed(shares, assets);
         if (claimRewards) _claim();
+    }
+
+    function _unstake(uint256 shares) private returns (uint256) {
+        if (shares == type(uint256).max) shares = stakedShares();
+        if (shares == 0) revert ZeroAmount();
+        stakingRewards.withdraw(shares);
+        return shares;
     }
 
     function _claim() private returns (uint256 amount) {
@@ -216,7 +231,7 @@ contract PersonalStakingHelper is ReentrancyGuard {
         emit TokenRecovered(address(token), amount);
     }
 
-    function stakedShares() external view returns (uint256) {
+    function stakedShares() public view returns (uint256) {
         return stakingRewards.balanceOf(address(this));
     }
 

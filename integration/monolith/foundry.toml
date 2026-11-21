@@ -3,6 +3,7 @@ src = "../../lib/monolith/src"
 test = "test"
 out = "out"
 libs = ["../../lib"]
+allow_paths = ["../../src"]
 auto_detect_remappings = false
 solc = "0.8.24"
 optimizer = true

@@ -85,9 +85,11 @@ Native-ETH inputs and separate approval-spender contracts are not part
 of this interface. Use trusted router addresses and calldata, including the
 swap's own minimum output. Set `minCoinOut` from the swap quote; `minShares` applies to the entire Coin balance,
 including Coin previously sent to this owner's helper. Unspent non-Coin input
-remains recoverable through `recoverToken`. If Coin itself is the input, its
+from the current swap is returned to the owner. Use `recoverToken` for earlier
+balances or tokens sent directly to the helper. If Coin itself is the input, its
 unspent balance is staked too and `minCoinOut` measures the net increase after
-funding. Use `depositAndStake` for ordinary Coin entry.
+funding. Use `depositAndStake` for ordinary Coin entry. The UI's existing native
+ETH and routes that deliver sCoin directly can keep their wallet-based flow.
 
 Owner actions on the helper:
 
@@ -96,10 +98,14 @@ Owner actions on the helper:
 | `claim()` | Claims GOV and forwards the helper's entire loose GOV balance to its owner. |
 | `claimAndStake()` | Claims GOV and stakes the helper's entire loose GOV balance directly for its owner. |
 | `claimAndCompound(compoundVault, minShares)` | Deposits newly claimed GOV into the selected Yearn vault and mints vault shares to the owner. |
-| `withdraw(shares, claimRewards)` | Unstakes the pool's Coin or sCoin to the owner. |
-| `withdrawAndRedeem(shares, minAssets, claimRewards)` | For sCoin pools only, unstakes and redeems sCoin to Coin for the owner. |
+| `withdraw(shares, claimRewards)` | Unstakes Coin or sCoin to the owner. Pass max uint256 to withdraw the entire position. |
+| `withdrawAndRedeem(shares, minAssets, claimRewards)` | For sCoin pools only, unstakes and redeems sCoin to Coin. Pass max uint256 to redeem the entire position. |
 | `recoverToken(token)` | Returns loose tokens to the owner without touching the staked position. |
 
+For **Withdraw all** and **Unstake all**, pass `type(uint256).max` as `shares`.
+Both routes read the full pool balance at execution, so the exit does not depend
+on rounding a quote or on the position staying the same after signing. For a
+redeem quote, use `previewRedeem(stakedShares())` and pass a minimum asset amount.
 Both withdrawal routes optionally claim GOV in the same transaction. If a claim
 fails, the combined transaction reverts; retry with `claimRewards=false` to exit
 without calling the rewards payout. Unpaid rewards remain claimable after a

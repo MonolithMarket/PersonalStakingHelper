@@ -48,7 +48,7 @@ contract ClaimAndStakeTest is HelperFixture {
         vm.warp(vm.getBlockTimestamp() + 1 days);
         uint256 second = helper.earned();
         vm.prank(alice);
-        helper.withdraw(amount, false);
+        helper.withdraw(type(uint256).max, false);
         vm.prank(alice);
         helper.claimAndStake();
         assertEq(staker.balanceOf(alice), first + second);
@@ -64,6 +64,13 @@ contract ClaimAndStakeTest is HelperFixture {
         uint256 reward = helper.earned();
         vm.prank(alice);
         vm.expectRevert("ROUTER_BLOCKED");
+        helper.claimAndStake();
+        assertEq(helper.earned(), reward);
+        vm.mockCall(
+            address(staker), abi.encodeWithSignature("depositFor(address,uint256)", alice, reward), abi.encode(false)
+        );
+        vm.prank(alice);
+        vm.expectRevert(PersonalStakingHelper.StakeFailed.selector);
         helper.claimAndStake();
         assertEq(helper.earned(), reward);
         assertEq(gov.allowance(address(helper), address(staker)), 0);
