@@ -9,6 +9,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IStakingRewards} from "./interfaces/IStakingRewards.sol";
 import {ICoinDAOFactory} from "./interfaces/ICoinDAOFactory.sol";
+import {IYearnVaultRegistry} from "./interfaces/IYearnVaultRegistry.sol";
 import {PersonalStakingHelper} from "./PersonalStakingHelper.sol";
 
 /// @notice Token or sToken staking for GOV rewards, with one helper per owner and CoinDAO.
@@ -35,10 +36,12 @@ contract PersonalStakingHelperFactory is ReentrancyGuard, Ownable {
     );
     event Staked(uint256 indexed daoId, address indexed owner, address indexed helper, uint256 shares);
 
-    constructor(ICoinDAOFactory coinDAOFactory_, address routerAdmin) Ownable(routerAdmin) {
+    constructor(ICoinDAOFactory coinDAOFactory_, address routerAdmin, IYearnVaultRegistry yearnRegistry_)
+        Ownable(routerAdmin)
+    {
         if (address(coinDAOFactory_).code.length == 0) revert InvalidFactory();
         coinDAOFactory = coinDAOFactory_;
-        implementation = new PersonalStakingHelper();
+        implementation = new PersonalStakingHelper(yearnRegistry_);
     }
 
     /// @notice Enables or disables a vetted swap router. All routers start disabled.

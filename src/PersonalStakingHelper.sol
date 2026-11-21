@@ -7,6 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IStakingRewards, IStakedGovToken} from "./interfaces/IStakingRewards.sol";
+import {IYearnVaultRegistry} from "./interfaces/IYearnVaultRegistry.sol";
 
 /// @notice One owner's position in a fixed Monolith vault and existing rewards pool.
 /// @dev Each clone's owner and market are set once by the factory at creation.
@@ -14,6 +15,9 @@ contract PersonalStakingHelper is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public immutable factory;
+    IYearnVaultRegistry public immutable yearnRegistry;
+    uint64 private constant YEARN_ALLOCATOR_VAULT_TYPE = 1;
+
     IERC4626 public vault;
     IStakingRewards public stakingRewards;
     IStakedGovToken public govStaking;
@@ -27,6 +31,8 @@ contract PersonalStakingHelper is ReentrancyGuard {
     error ZeroAddress();
     error ZeroAmount();
     error NotVaultStaking();
+    error InvalidYearnRegistry();
+    error InvalidCompoundVault();
     error InsufficientShares(uint256 received, uint256 minimum);
     error InsufficientAssets(uint256 received, uint256 minimum);
 
@@ -35,11 +41,14 @@ contract PersonalStakingHelper is ReentrancyGuard {
     event WithdrawnAndRedeemed(uint256 shares, uint256 assets);
     event RewardClaimed(uint256 amount);
     event RewardStaked(uint256 amount);
+    event RewardCompounded(address indexed vault, uint256 amount, uint256 shares);
     event TokenRecovered(address indexed token, uint256 amount);
 
     /// @dev Called only by the factory's constructor. Locks the implementation.
-    constructor() {
+    constructor(IYearnVaultRegistry yearnRegistry_) {
+        if (address(yearnRegistry_).code.length == 0) revert InvalidYearnRegistry();
         factory = msg.sender;
+        yearnRegistry = yearnRegistry_;
         owner = address(this);
     }
 
@@ -136,6 +145,34 @@ contract PersonalStakingHelper is ReentrancyGuard {
             govStaking.depositFor(owner, amount);
         }
         emit RewardStaked(amount);
+    }
+
+    /// @notice Claims new GOV and deposits it into the selected Yearn vault for the fixed owner.
+    /// @return shares The shares minted, or zero if there were no rewards.
+    function claimAndCompound(IERC4626 compoundVault, uint256 minShares)
+        external
+        onlyOwner
+        nonReentrant
+        returns (uint256 shares)
+    {
+        IERC20 gov = rewardToken;
+        (address registeredAsset,, uint64 vaultType,,,) = yearnRegistry.vaultInfo(address(compoundVault));
+        if (
+            registeredAsset != address(gov) || vaultType != YEARN_ALLOCATOR_VAULT_TYPE
+                || compoundVault.asset() != address(gov)
+        ) revert InvalidCompoundVault();
+
+        uint256 balanceBefore = gov.balanceOf(address(this));
+        stakingRewards.getReward();
+        uint256 amount = gov.balanceOf(address(this)) - balanceBefore;
+        if (amount == 0) return 0;
+
+        gov.forceApprove(address(compoundVault), amount);
+        shares = compoundVault.deposit(amount, owner);
+        if (shares == 0 || shares < minShares) revert InsufficientShares(shares, minShares);
+        gov.forceApprove(address(compoundVault), 0);
+
+        emit RewardCompounded(address(compoundVault), amount, shares);
     }
 
     /// @notice Unstakes the pool's Token or sToken to the owner and optionally claims GOV.

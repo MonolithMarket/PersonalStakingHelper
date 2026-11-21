@@ -282,8 +282,9 @@ contract ZapAndStakeTest is HelperFixture {
 
     function test_InitialAdminIsExplicitAndCannotBeZero() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-        new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), address(0));
-        PersonalStakingHelperFactory other = new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), bob);
+        new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), address(0), yearnRegistry);
+        PersonalStakingHelperFactory other =
+            new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), bob, yearnRegistry);
         assertEq(other.owner(), bob);
         assertFalse(other.allowedRouters(address(router)));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));

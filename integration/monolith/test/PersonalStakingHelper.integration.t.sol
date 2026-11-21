@@ -80,8 +80,13 @@ contract PersonalStakingHelperIntegrationTest is Test {
             deployCode(_artifact("CoinDAOFactory"), abi.encode(address(monolith), address(this), implementations))
         );
         deployer = ICoinDAOTestDeployer(_deployCoinDAOCode("CoinDAOTestDeployer"));
+        address yearnRegistry = deployCode(
+            string.concat(vm.projectRoot(), "/../../out/YearnVaultFixtures.sol/YearnVaultRegistryFixture.json")
+        );
         factory = PersonalStakingHelperFactory(
-            deployCode(_artifact("PersonalStakingHelperFactory"), abi.encode(address(registry), address(this)))
+            deployCode(
+                _artifact("PersonalStakingHelperFactory"), abi.encode(address(registry), address(this), yearnRegistry)
+            )
         );
     }
 

@@ -464,9 +464,9 @@ contract PersonalStakingHelperTest is HelperFixture {
 
     function test_InvalidCoinDAOFactoryRejected() public {
         vm.expectRevert(PersonalStakingHelperFactory.InvalidFactory.selector);
-        new PersonalStakingHelperFactory(ICoinDAOFactory(address(0)), address(this));
+        new PersonalStakingHelperFactory(ICoinDAOFactory(address(0)), address(this), yearnRegistry);
         vm.expectRevert(PersonalStakingHelperFactory.InvalidFactory.selector);
-        new PersonalStakingHelperFactory(ICoinDAOFactory(alice), address(this));
+        new PersonalStakingHelperFactory(ICoinDAOFactory(alice), address(this), yearnRegistry);
     }
 
     function test_FactoryRejectsTokenCallbackReentrancy() public {

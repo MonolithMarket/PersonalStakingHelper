@@ -15,6 +15,7 @@ import {PersonalStakingHelperFactory} from "../src/PersonalStakingHelperFactory.
 import {IStakingRewards} from "../src/interfaces/IStakingRewards.sol";
 import {ICoinDAOFactory} from "../src/interfaces/ICoinDAOFactory.sol";
 import {CoinDAOFactoryRegistry} from "./fixtures/CoinDAOFactoryRegistry.sol";
+import {YearnVaultRegistryFixture} from "./fixtures/YearnVaultFixtures.sol";
 
 contract MockToken is ERC20 {
     bool public blocked;
@@ -117,6 +118,7 @@ abstract contract HelperFixture is Test {
     StakingRewards internal pool;
     PersonalStakingHelperFactory internal factory;
     CoinDAOFactoryRegistry internal coinDAOFactory;
+    YearnVaultRegistryFixture internal yearnRegistry;
     uint256 internal daoId;
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
@@ -133,7 +135,9 @@ abstract contract HelperFixture is Test {
         lender = market.lender;
         vault = market.vault;
         pool = market.pool;
-        factory = new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), address(this));
+        yearnRegistry = new YearnVaultRegistryFixture();
+        factory =
+            new PersonalStakingHelperFactory(ICoinDAOFactory(address(coinDAOFactory)), address(this), yearnRegistry);
         fundAndApprove(market, alice, 1e30);
         fundAndApprove(market, bob, 1e30);
     }

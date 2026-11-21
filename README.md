@@ -11,10 +11,11 @@ and [GovernanceFactory #12](https://github.com/MonolithMarket/GovernanceFactory/
 
 ## Deployment
 
-Deploy `PersonalStakingHelperFactory(coinDAOFactory, routerAdmin)` once per trusted
-CoinDAOFactory and chain. The constructor creates the shared implementation.
-Use a trusted multisig for `routerAdmin`. Verify the registry, admin and chain
-before deployment.
+Deploy `PersonalStakingHelperFactory(coinDAOFactory, routerAdmin, yearnRegistry)`
+once per trusted CoinDAOFactory and chain. The constructor creates the shared
+implementation and pins the Yearn V3 registry for every helper. Use a trusted
+multisig for `routerAdmin`. On Ethereum, the Yearn V3 registry is
+`0xd40ecf29e001c76dcc4cc0d9cd50520ce845b038`.
 
 All zap routers start disabled. The admin enables vetted swap routers with
 `setRouter(router, true)` and removes them with `setRouter(router, false)`.
@@ -94,6 +95,7 @@ Owner actions on the helper:
 | --- | --- |
 | `claim()` | Claims GOV and forwards the helper's entire loose GOV balance to its owner. |
 | `claimAndStake()` | Claims GOV and stakes the helper's entire loose GOV balance directly for its owner. |
+| `claimAndCompound(compoundVault, minShares)` | Deposits newly claimed GOV into the selected Yearn vault and mints vault shares to the owner. |
 | `withdraw(shares, claimRewards)` | Unstakes the pool's Coin or sCoin to the owner. |
 | `withdrawAndRedeem(shares, minAssets, claimRewards)` | For sCoin pools only, unstakes and redeems sCoin to Coin for the owner. |
 | `recoverToken(token)` | Returns loose tokens to the owner without touching the staked position. |
@@ -109,6 +111,14 @@ transfer fully consumes. The non-transferable stGOV receipt belongs directly to 
 retains withdrawal, rewards and delegation rights. First-time voting delegation
 is separate. GOV staking harvests revenue; if it fails, the whole transaction
 reverts and plain `claim()` remains available. A zero GOV balance skips staking.
+
+For `claimAndCompound`, pass the exact Yearn vault shown to the user. For SWAN,
+use yvSWAN at `0xcE918671E6D9e56E19c5Cbc4DC45655d80C65265`. The helper requires
+a Yearn V3 allocator entry for the reward token and verifies the vault's
+`asset()`. Quote shares with the selected vault's `previewDeposit(earned())`
+and pass the user's minimum share output as `minShares`. No GOV approval is
+required from the owner. A failed deposit or insufficient share output reverts
+the claim, leaving the GOV available. With no new GOV, the method returns zero.
 
 For sCoin pools, use the vault's previews to set minimum outputs. Its first
 deposit permanently locks `1e16` shares; the helper checks the actual shares
@@ -169,7 +179,8 @@ compile unchanged with Solidity 0.8.24; helpers and governance compile with
 0.8.26. The integration tests load native artifacts across compiler versions.
 No RPC, credentials or environment files are needed.
 
-Tests cover ownership, initialization, slippage, claims and failed payouts,
+Tests cover ownership, initialization, slippage, claims, failed payouts and
+rollback when a Yearn deposit fails,
 reentrancy, donations, multiple users/DAOs, fuzzed exits and stateful invariants.
 Full integration scenarios launch actual Monolith lending markets and
 CoinDAOFactory rewards pools, including existing-market attachment. Only their
